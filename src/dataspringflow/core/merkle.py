@@ -8,7 +8,7 @@ from functools import cached_property
 from typing import Dict, List, Generator, Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from ..utils.hash import hash_file
+from ..utils import hash_file
 
 
 def walkdir(root: Path) -> Generator[tuple[Path, list[str], list[str]], None, None]:

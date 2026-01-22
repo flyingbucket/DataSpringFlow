@@ -2,7 +2,7 @@ import hashlib
 from pathlib import Path
 
 
-def _choose_chunk_size(file_size):
+def _choose_chunk_size(file_size: int):
     if file_size < 10 * 1024**2:  # <10 MB
         return 1024 * 16
     elif file_size < 100 * 1024**2:  # 10~100 MB
