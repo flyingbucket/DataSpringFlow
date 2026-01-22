@@ -1,3 +1,19 @@
+[build-system]
+requires = ["setuptools>=65.5.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dataspringflow"
+version = "0.1.0"
+description = "Deep learning dataset management tool"
+authors = [{ name = "flyingbucket" }]
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+dependencies = ["pyyaml", "joblib"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.ruff]
 src = ["src", "tests"]
