@@ -17,7 +17,7 @@ class DummyMetadataLoader(MetadataLoader):
 
 
 class DummyMetadataWriter(MetadataWriter):
-    def save(self, name: str, tag: str) -> int:
+    def save(self, metadata: Metadata) -> int:
         raise NotImplementedError("Dummy writer: backend not implemented yet")
 
 

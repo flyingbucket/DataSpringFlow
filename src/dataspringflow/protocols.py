@@ -12,7 +12,7 @@ class MetadataLoader(Protocol):
 
 
 class MetadataWriter(Protocol):
-    def save(self, name: str, tag: str) -> int: ...
+    def save(self, metadata: Metadata) -> int: ...
 
 
 class HashDictLoader(Protocol):
