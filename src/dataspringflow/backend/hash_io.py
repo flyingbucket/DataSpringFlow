@@ -10,7 +10,7 @@ class HashWriter:
     def __init__(self, merkle_tree: FileMerkleTree):
         self.tree = merkle_tree
 
-    def to_dict(self) -> Dict[Path, str]:
+    def to_dict(self) -> dict[Path, str]:
         return dict(self.tree.iter_path_hash())
 
     def to_json(self, file_path: Path) -> None:
