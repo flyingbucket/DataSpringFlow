@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any
 from dataspringflow.protocols import (
     RegistryFactory,
     MetadataLoader,
@@ -33,6 +33,9 @@ class DummyHashWriter(HashDictWriter):
 
 # 空实现工厂
 class DummyRegistryFactory(RegistryFactory):
+    def __init__(self, config: dict[str, Any]) -> None:
+        self.config = config
+
     def create_metadata_loader(self) -> MetadataLoader:
         return DummyMetadataLoader()
 
@@ -47,6 +50,6 @@ class DummyRegistryFactory(RegistryFactory):
 
 
 # 工厂函数占位
-def get_registry_factory(backend: str) -> RegistryFactory:
+def get_registry_factory(backend: str, backend_conf: dict[str, Any]) -> RegistryFactory:
     # 暂时返回 Dummy 实现
-    return DummyRegistryFactory()
+    return DummyRegistryFactory(backend_conf)
