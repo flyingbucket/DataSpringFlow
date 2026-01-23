@@ -28,11 +28,11 @@ target-version = "py37"
 
 [tool.pyright]
 include = ["src"]
-pythonVersion = "3.7"
+pythonVersion = "3.9"
 typeCheckingMode = "strict"
 
 [tool.isort]
 profile = "black"
-line_length = 88
+line_length = 120
 known_first_party = ["dataspringflow"]
 src_paths = ["src"]
