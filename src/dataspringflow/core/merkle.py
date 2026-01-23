@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import joblib  # type: ignore
 
 from pathlib import Path
 from functools import cached_property
-from typing import Dict, List, Generator, Iterator
+from typing import Dict, Iterable, List, Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from ..utils import hash_file
+from .hash_utils import hash_file
 
 
 def walkdir(root: Path) -> Generator[tuple[Path, list[str], list[str]], None, None]:
@@ -65,12 +64,15 @@ class FileMerkleTree:
                 node.add_child(child)
         return nodes[self.root_path]
 
-    def iter_path_hash(self) -> Iterator[tuple[Path, str]]:
+    def iter_path_hash(self) -> Generator[tuple[Path, str]]:
         stack = [self.root_node]
         while stack:
             node = stack.pop()
             yield node.path, node.hash
             stack.extend(node.childs)
+
+    def items(self) -> Iterable[tuple[Path, str]]:
+        return self.iter_path_hash()
 
     def _serial_hash(self) -> str:
         return self.root_node.hash
@@ -174,24 +176,3 @@ class FileMerkleTree:
             h: str = self._serial_hash()
         self._hash_cache[size_threshold] = h
         return h
-
-
-class HashWriter:
-    def __init__(self, merkle_tree: FileMerkleTree):
-        self.tree = merkle_tree
-
-    def to_dict(self) -> dict[Path, str]:
-        return dict(self.tree.iter_path_hash())
-
-    def to_json(self, file_path: Path) -> None:
-        import json
-
-        d = {str(p): h for p, h in self.to_dict().items()}
-        with open(file_path, "w") as f:
-            json.dump(d, f, indent=2)
-
-    def to_joblib(self, file_path: Path) -> None:
-        joblib.dump(self.to_dict(), file_path)  # type: ignore
-
-    def to_db(self) -> None:
-        raise NotImplementedError
