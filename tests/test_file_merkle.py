@@ -35,7 +35,7 @@ class TestFileMerkleTree(unittest.TestCase):
 
         # 并行 hash
         start = time.time()
-        parallel_hash = tree_parallel._parallal_hash()
+        parallel_hash = tree_parallel._parallel_hash()
         parallel_time = time.time() - start
 
         # asyncio hash
