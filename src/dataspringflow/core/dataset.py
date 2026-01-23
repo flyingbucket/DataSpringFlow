@@ -1,85 +1,39 @@
 from __future__ import annotations
 
-import yaml
-
-from dataclasses import dataclass
-from pathlib import Path
-from typing import List, Optional
-
-
-@dataclass(frozen=True)
-class Metadata:
-    name: str
-    tag: str
-    path: Path
-    description_path: Path
-    hash: int
-    dependencies: List[str]  # List[Metadata.id]
-    script_path: Optional[Path] = None
-
-    @property
-    def id(self) -> str:
-        return f"{self.name}@{self.tag}"
-
-    def to_dict(self) -> dict:
-        return {
-            "name": self.name,
-            "tag": self.tag,
-            "path": str(self.path),
-            "description_path": str(self.description_path),
-            "hash": self.hash,
-            "dependencies": list(self.dependencies),
-            "script_path": str(self.script_path) if self.script_path else None,
-        }
-
-
-class MetadataLoader:
-    @staticmethod
-    def load_from_dict(metadata_dict) -> Metadata:
-        return Metadata(
-            name=metadata_dict["name"],
-            tag=metadata_dict["tag"],
-            path=Path(metadata_dict["path"]),
-            description_path=Path(metadata_dict["description_path"]),
-            hash=metadata_dict["hash"],
-            dependencies=metadata_dict.get("dependencies", []),
-            script_path=Path(metadata_dict["script_path"])
-            if metadata_dict.get("script_path")
-            else None,
-        )
-
-    @staticmethod
-    def load_from_yaml(name: str, tag: str,root: Path = Path("/opt/DSFRegistry")) -> Metadata:
-        metadata_path = root / name / tag / "metadata.yaml"
-        with open(metadata_path, "r") as f:
-            metadata_dict = yaml.safe_load(f)
-        return MetadataLoader.load_from_dict(metadata_dict)
-
-    @staticmethod
-    def load_from_db(**kwargs) -> Metadata:
-        raise NotImplementedError("Database metadata loader not implemented yet")
-
-    @staticmethod
-    def load(
-        name: str,
-        tag: str,
-        *,
-        backend: str = "yaml",
-        root: Path = Path("/opt/DSFRegistry"),
-    ) -> Metadata:
-        if backend == "yaml":
-            return MetadataLoader.load_from_yaml(
-                name,tag,root
-            )
-        elif backend == "database":
-            return MetadataLoader.load_from_db()
-        else:
-            raise ValueError(
-                f"Invalid session type {backend}. Should be 'yaml' or 'database' "
-            )
+from dataspringflow.core.dag import DAG
+from ..protocols import HashSnapshot
+from .merkle import FileMerkleTree
+from .metadata import Metadata
+from .dag import DAG
+from .hash_utils import HashDiff, compute_hash_diff
+from ..backend.hash_io import HashLoader
 
 
 class DSFdataset:
-    def __init__(self, metadata: Metadata)) -> None:
-        self.metadata = metadata
-    
+    """
+    面向用户的dataset接口，registry按name@tag查询后返回此类的实例，而不是在用户代码中完成实例化
+
+    功能：
+        - 以只读方式获取数据集metadata各属性
+        - 校验数据集哈希
+        - 计算并解析依赖图
+        - 获取上游依赖数据集的健康状况
+    """
+
+    def __init__(self, metadata: Metadata, dag: DAG) -> None:
+        self.info = metadata
+        self.DAG = dag
+
+    def verify(
+        self, *, size_threshold: int = 100 * 1024, max_workers: int = 16
+    ) -> tuple[bool, HashDiff]:
+        merkle = FileMerkleTree(self.info.path)
+        current_hash = merkle.get_hash(
+            size_threshold=size_threshold, max_workers=max_workers
+        )
+        if self.info.hash == current_hash:
+            return (True, HashDiff(set(), set(), set()))
+        else:
+            old_snapshot = HashLoader().load(name=self.info.name, tag=self.info.tag)
+            diff = compute_hash_diff(old_snapshot, merkle)
+            return (False, diff)
