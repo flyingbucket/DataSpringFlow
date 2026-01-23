@@ -1,12 +1,15 @@
 from __future__ import annotations
+from typing import TYPE_CHECKING
 
-from dataspringflow.core.dag import DAG
 from ..protocols import HashSnapshot
 from .merkle import FileMerkleTree
 from .metadata import Metadata
-from .dag import DAG
+
 from .hash_utils import HashDiff, compute_hash_diff
 from ..backend.hash_io import HashLoader
+
+if TYPE_CHECKING:
+    from .dag import DAG
 
 
 class DSFdataset:
@@ -16,11 +19,11 @@ class DSFdataset:
     功能：
         - 以只读方式获取数据集metadata各属性
         - 校验数据集哈希
-        - 计算并解析依赖图
+        - 获取依赖图
         - 获取上游依赖数据集的健康状况
     """
 
-    def __init__(self, metadata: Metadata, dag: DAG) -> None:
+    def __init__(self, metadata: Metadata, dag: "DAG") -> None:
         self.info = metadata
         self.DAG = dag
 
@@ -34,6 +37,8 @@ class DSFdataset:
         if self.info.hash == current_hash:
             return (True, HashDiff(set(), set(), set()))
         else:
-            old_snapshot = HashLoader().load(name=self.info.name, tag=self.info.tag)
+            old_snapshot: HashSnapshot = HashLoader().load(
+                name=self.info.name, tag=self.info.tag
+            )
             diff = compute_hash_diff(old_snapshot, merkle)
             return (False, diff)

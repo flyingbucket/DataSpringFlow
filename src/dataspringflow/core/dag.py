@@ -4,11 +4,11 @@ from typing import Generator, Union
 from dataspringflow.core.metadata import Metadata
 
 from .merkle import FileMerkleTree
-from .registry import DataRegistry
+from .registry import DSFRegistry
 
 
 class DAG:
-    def __init__(self, root: str, registry: DataRegistry) -> None:
+    def __init__(self, root: str, registry: DSFRegistry) -> None:
         self.root = root
         self._regi = registry
 

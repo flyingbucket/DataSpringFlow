@@ -1,11 +1,10 @@
 from __future__ import annotations
-from pathlib import Path
+import asyncio
 from typing import Any, Union
 from ..protocols import HashSnapshot, RegistryFactory
 from ..factory import get_registry_factory
 from .metadata import Metadata
 from .dataset import DSFdataset
-from .dag import DAG
 
 
 def parse_id(id_str: str) -> tuple[str, str]:
@@ -18,7 +17,7 @@ def parse_id(id_str: str) -> tuple[str, str]:
     return name, tag
 
 
-class DataRegistry:
+class DSFRegistry:
     def __init__(
         self, backend: str = "yaml", backend_conf: Union[dict[str, Any], None] = None
     ) -> None:
@@ -34,10 +33,23 @@ class DataRegistry:
         name, tag = parse_id(id)
         return self._metadata_loader.load(name, tag)
 
-    def get_hashDict(self, name: str, tag: str) -> HashSnapshot:
+    def get_hash_snapshot(self, id: str) -> HashSnapshot:
+        name, tag = parse_id(id)
         return self._hash_loader.load(name, tag)
 
     def get(self, id: str) -> DSFdataset:
+        from .dag import DAG
+
         metadata = self.get_info(id)
         dag = DAG(id, self)
         return DSFdataset(metadata, dag)
+
+    async def save(self, metadata: Metadata) -> dict[str, int]:
+        # 同时执行 metadata 和 hash 写入
+        metadata_task = asyncio.to_thread(self._metadata_writer.save, metadata)
+        hash_task = asyncio.to_thread(
+            self._hash_writer.save, metadata.name, metadata.tag
+        )
+
+        metadata_exit, hash_exit = await asyncio.gather(metadata_task, hash_task)
+        return {"metadata": metadata_exit, "hash": hash_exit}
