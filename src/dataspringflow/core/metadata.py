@@ -2,20 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple, TypedDict
+from typing import Optional, Tuple, TypedDict, Union
 
 
 @dataclass(frozen=True)
 class Metadata:
-    __slots__ = (
-        "name",
-        "tag",
-        "path",
-        "description_path",
-        "hash",
-        "dependencies",
-        "script_path",
-    )
     name: str
     tag: str
     path: Path
@@ -53,3 +44,4 @@ class MetadataDict(TypedDict):
     description_path: str
     hash: str
     dependencies: Tuple[str]
+    script_path: Union[str, None]
