@@ -1,6 +1,7 @@
 import hashlib
 from pathlib import Path
 from dataclasses import dataclass
+from ..protocols import HashSnapshot
 
 
 def _choose_chunk_size(file_size: int):
