@@ -7,6 +7,15 @@ from typing import Optional, Tuple, TypedDict
 
 @dataclass(frozen=True)
 class Metadata:
+    __slots__ = (
+        "name",
+        "tag",
+        "path",
+        "description_path",
+        "hash",
+        "dependencies",
+        "script_path",
+    )
     name: str
     tag: str
     path: Path
@@ -14,6 +23,12 @@ class Metadata:
     hash: str
     dependencies: Tuple[str]  # Tuple[Metadata.id]
     script_path: Optional[Path] = None
+
+    def __post_init__(self) -> None:
+        if "@" in self.name:
+            raise ValueError(f"Metadata.name must not contain '@': {self.name}")
+        if "@" in self.tag:
+            raise ValueError(f"Metadata.tag must not contain '@': {self.tag}")
 
     @property
     def id(self) -> str:
@@ -38,4 +53,3 @@ class MetadataDict(TypedDict):
     description_path: str
     hash: str
     dependencies: Tuple[str]
-    script_path: Optional[str]
