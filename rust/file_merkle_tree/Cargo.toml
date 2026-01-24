@@ -1,0 +1,11 @@
+[package]
+name = "file_merkle_tree"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "file_merkle_tree"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.27", features = ["extension-module"] }
