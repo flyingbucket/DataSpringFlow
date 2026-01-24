@@ -1,31 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import asyncio
 
 from pathlib import Path
 from functools import cached_property
 from typing import Dict, Iterable, List, Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .hash_utils import hash_file
-
-
-def walkdir(root: Path) -> Generator[tuple[Path, list[str], list[str]], None, None]:
-    root = Path(root)
-
-    dirs: list[str] = []
-    files: list[str] = []
-
-    for child in root.iterdir():
-        if child.is_dir():
-            dirs.append(child.name)
-        elif child.is_file():
-            files.append(child.name)
-
-    yield root, dirs, files
-
-    for d in dirs:
-        yield from walkdir(root / d)
+from ..utils import hash_file
+from ..utils import walkdir
 
 
 class Node:
@@ -104,11 +88,10 @@ class FileMerkleTree:
             root_hash = compute_node_hash(self.root_node, executor)
         return root_hash
 
-    def _async_hash(self) -> str:
+    async def _async_hash(self) -> str:
         """
         not used now
         """
-        import asyncio
 
         async def compute_node_hash(node: Node) -> str:
             if node.path.is_file():
@@ -132,18 +115,7 @@ class FileMerkleTree:
                 h.update(child_hash.encode("utf-8"))
             return h.hexdigest()
 
-        # 同步封装：在内部创建/运行事件循环
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            # 如果已经在 asyncio 环境里，直接创建任务并等待结果
-            return loop.run_until_complete(compute_node_hash(self.root_node))
-        else:
-            # 普通同步调用，创建新事件循环
-            return asyncio.run(compute_node_hash(self.root_node))
+        return await compute_node_hash(self.root_node)
 
     def get_hash(
         self, *, size_threshold: int = 100 * 1024, max_workers: int = 16
@@ -176,3 +148,25 @@ class FileMerkleTree:
             h: str = self._serial_hash()
         self._hash_cache[size_threshold] = h
         return h
+
+    async def get_hash_async(self, *, size_threshold: int = 100 * 1024) -> str:
+        """
+        async 版本，内部使用 asyncio + to_thread
+        """
+        total_files = 0
+        large_files = 0
+        stack = [self.root_node]
+        while stack:
+            node = stack.pop()
+            if node.path.is_file():
+                total_files += 1
+                if node.path.stat().st_size >= size_threshold:
+                    large_files += 1
+            stack.extend(node.childs)
+
+        if total_files == 0:
+            return await self._async_hash()
+        elif large_files / total_files >= 0.5:
+            return await self._async_hash()  # async 并发版本
+        else:
+            return await asyncio.to_thread(self._serial_hash)  # async 串行版本
