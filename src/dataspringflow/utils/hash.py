@@ -15,9 +15,12 @@ def _choose_chunk_size(file_size: int):
         return 1024 * 1024  # 1 MB
 
 
-def hash_file(path: Path) -> str:
+def hash_file(path: Path, root_path: Path) -> str:
     chunk_size = _choose_chunk_size(path.stat().st_size)
+    relative_path = path.relative_to(root_path).as_posix().encode("utf-8")
     h = hashlib.md5()
+    h.update(relative_path)
+    h.update(b"\0")
     with open(path, "rb") as f:
         chunk = f.read(chunk_size)
         while chunk:

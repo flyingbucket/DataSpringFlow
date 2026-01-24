@@ -13,8 +13,9 @@ from ..utils import walkdir
 
 
 class Node:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, root_path: Path) -> None:
         self.path = path
+        self.root_path = root_path
         self.childs: List[Node] = []
 
     def add_child(self, node: Node) -> None:
@@ -22,8 +23,13 @@ class Node:
 
     @cached_property
     def hash(self) -> str:
-        if self.path.is_file():
-            return hash_file(self.path)
+        if len(self.childs) == 0:
+            if self.path.is_file():  # leaf node if a file
+                return hash_file(self.path, self.root_path)
+            else:  # leaf node if an empty folder
+                return hashlib.md5(
+                    self.path.relative_to(self.root_path).as_posix().encode("utf-8")
+                ).hexdigest()
         h = hashlib.md5()
         for child in sorted(self.childs, key=lambda x: x.path.relative_to(self.path)):
             h.update(child.hash.encode(encoding="utf-8"))
@@ -39,12 +45,12 @@ class FileMerkleTree:
     def _build(self) -> Node:
         nodes: Dict[Path, Node] = {}
         for path, dirs, files in walkdir(self.root_path):
-            node = nodes.setdefault(path, Node(path))
+            node = nodes.setdefault(path, Node(path, self.root_path))
             for dir in dirs:
-                child = nodes.setdefault(path / dir, Node(path / dir))
+                child = nodes.setdefault(path / dir, Node(path / dir, self.root_path))
                 node.add_child(child)
             for file in files:
-                child = nodes.setdefault(path / file, Node(path / file))
+                child = nodes.setdefault(path / file, Node(path / file, self.root_path))
                 node.add_child(child)
         return nodes[self.root_path]
 
@@ -63,8 +69,13 @@ class FileMerkleTree:
 
     def _parallel_hash(self, max_workers: int = 16) -> str:
         def compute_node_hash(node: Node, executor: ThreadPoolExecutor) -> str:
-            if node.path.is_file():
-                return hash_file(node.path)
+            if len(node.childs) == 0:  # a leaf node
+                if node.path.is_file():  # leaf node is a file
+                    return hash_file(node.path, self.root_path)
+                else:  # leaf node is an empty folder
+                    return hashlib.md5(
+                        node.path.relative_to(node.root_path).as_posix().encode("utf-8")
+                    ).hexdigest()
             h = hashlib.md5()
 
             child_hashes: List[tuple[Path, str]] = []
@@ -89,14 +100,14 @@ class FileMerkleTree:
         return root_hash
 
     async def _async_hash(self) -> str:
-        """
-        not used now
-        """
-
         async def compute_node_hash(node: Node) -> str:
-            if node.path.is_file():
-                # 异步执行同步 hash_file
-                return await asyncio.to_thread(hash_file, node.path)
+            if len(node.childs) == 0:  # a leaf node
+                if node.path.is_file():  # leaf node is a file
+                    return await asyncio.to_thread(hash_file, node.path, self.root_path)
+                else:  # leaf node is an empty folder
+                    return hashlib.md5(
+                        node.path.relative_to(node.root_path).as_posix().encode("utf-8")
+                    ).hexdigest()
 
             # 异步计算所有子节点
             child_tasks = [
@@ -142,7 +153,7 @@ class FileMerkleTree:
         # 判断大多数文件是否 >= 阈值
         if total_files == 0:
             h: str = self._serial_hash()  # 空目录或全目录文件夹
-        if large_files / total_files >= 0.5:
+        elif large_files * 2 >= total_files:
             h: str = self._parallel_hash(max_workers=max_workers)
         else:
             h: str = self._serial_hash()
@@ -166,7 +177,7 @@ class FileMerkleTree:
 
         if total_files == 0:
             return await self._async_hash()
-        elif large_files / total_files >= 0.5:
+        elif large_files * 2 >= total_files:
             return await self._async_hash()  # async 并发版本
         else:
             return await asyncio.to_thread(self._serial_hash)  # async 串行版本
