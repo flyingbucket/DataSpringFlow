@@ -1,10 +1,10 @@
-from typing import Any
+from typing import Any, Optional
 from dataspringflow.protocols import (
     RegistryFactory,
     MetadataLoader,
-    MetadataWriter,
     HashDictLoader,
-    HashDictWriter,
+    AtomicWriter,
+    HashSnapshot,
 )
 from dataspringflow.core.metadata import Metadata
 from pathlib import Path
@@ -16,19 +16,19 @@ class DummyMetadataLoader(MetadataLoader):
         raise NotImplementedError("Dummy loader: backend not implemented yet")
 
 
-class DummyMetadataWriter(MetadataWriter):
-    def save(self, metadata: Metadata) -> int:
-        raise NotImplementedError("Dummy writer: backend not implemented yet")
-
-
 class DummyHashLoader(HashDictLoader):
     def load(self, name: str, tag: str) -> dict[Path, str]:
         raise NotImplementedError("Dummy hash loader: backend not implemented yet")
 
 
-class DummyHashWriter(HashDictWriter):
-    def save(self, name: str, tag: str) -> int:
-        raise NotImplementedError("Dummy hash writer: backend not implemented yet")
+class DummyAtomicWriter(AtomicWriter):
+    def save(
+        self, metadata: Metadata, hash_snapshot: Optional[HashSnapshot] = None
+    ) -> bool:
+        raise NotImplementedError("Dummy AtomicWriter: backend not implemented yet")
+
+    def rollback(self, metadata: Metadata) -> None:
+        raise NotImplementedError("Dummy AtomicWriter: backend not implemented yet")
 
 
 # 空实现工厂
@@ -39,14 +39,11 @@ class DummyRegistryFactory(RegistryFactory):
     def create_metadata_loader(self) -> MetadataLoader:
         return DummyMetadataLoader()
 
-    def create_metadata_writer(self) -> MetadataWriter:
-        return DummyMetadataWriter()
-
     def create_hash_loader(self) -> HashDictLoader:
         return DummyHashLoader()
 
-    def create_hash_writer(self) -> HashDictWriter:
-        return DummyHashWriter()
+    def create_atomic_writer(self) -> AtomicWriter:
+        return DummyAtomicWriter()
 
 
 # 工厂函数占位

@@ -1,8 +1,7 @@
 import joblib  # type: ignore
 from pathlib import Path
-from ..core.hash_utils import HashSnapshot
 
-from dataspringflow.core.hash_utils import HashSnapshot
+from ..protocols import HashSnapshot
 from ..core.merkle import FileMerkleTree
 
 
