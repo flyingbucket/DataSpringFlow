@@ -1,76 +1,173 @@
-import unittest
-import tempfile
+import asyncio
 import shutil
-import time
+import tempfile
+import unittest
 from pathlib import Path
+
 from dataspringflow.core.merkle import FileMerkleTree
 
 
+def _write_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+def _make_dummy_dataset(root: Path) -> dict[str, Path]:
+    """
+    构造一个包含：
+    - 多级目录
+    - 空目录
+    - 多个文件（大小不同）
+    的数据集
+
+    返回一些关键路径，方便测试里重命名/移动。
+    """
+    # 目录结构：
+    # root/
+    #   a/
+    #     small.txt        (小文件)
+    #     sub/
+    #       medium.bin     (中等文件)
+    #   b/
+    #     empty_dir/       (空目录)
+    #   c/                 (空目录)
+    #   top.txt
+    a = root / "a"
+    b = root / "b"
+    c = root / "c"
+    empty_dir = b / "empty_dir"
+
+    (a / "sub").mkdir(parents=True, exist_ok=True)
+    empty_dir.mkdir(parents=True, exist_ok=True)
+    c.mkdir(parents=True, exist_ok=True)
+
+    # 文件内容：确定性，方便复现
+    _write_bytes(root / "top.txt", b"TOP\n")
+    _write_bytes(a / "small.txt", b"hello\n")
+    # 让 medium.bin 大一点（比如 256KB）以便你 size_threshold 判断更容易覆盖“并行”分支
+    _write_bytes(a / "sub" / "medium.bin", b"x" * (256 * 1024))
+
+    return {
+        "root": root,
+        "file_small": a / "small.txt",
+        "file_medium": a / "sub" / "medium.bin",
+        "file_top": root / "top.txt",
+        "empty_dir": empty_dir,
+        "empty_dir_parent": b,
+        "empty_dir_2": c,  # 另一个空目录
+    }
+
+
 class TestFileMerkleTree(unittest.TestCase):
-    def setUp(self):
-        self.temp_dir = Path(tempfile.mkdtemp())
+    def test_serial_parallel_async_consistent(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "dataset"
+            root.mkdir()
+            _make_dummy_dataset(root)
 
-    def tearDown(self):
-        shutil.rmtree(self.temp_dir)
+            t = FileMerkleTree(root)
 
-    def _create_files(self, num_files: int, file_size_kb: int = 1):
-        """创建指定数量和大小的文件"""
-        for i in range(num_files):
-            file_path = self.temp_dir / f"file{i}.txt"
-            file_path.write_bytes(b"x" * 1024 * file_size_kb)
+            # 1) 直接走串行
+            h_serial = t._serial_hash()
 
-    def _run_test(self, num_files: int, file_size_kb: int = 1):
-        print(f"\n--- 测试 {num_files} 个文件，每个 {file_size_kb}KB ---")
-        self._create_files(num_files, file_size_kb)
+            # 2) 直接走多线程并行
+            h_parallel = t._parallel_hash(max_workers=8)
 
-        # 创建两个独立的树实例，保证缓存不干扰
-        tree_serial = FileMerkleTree(self.temp_dir)
-        tree_parallel = FileMerkleTree(self.temp_dir)
-        tree_asyncio = FileMerkleTree(self.temp_dir)
+            # 3) 直接走 asyncio 并发（内部 to_thread）
+            h_async = asyncio.run(t._async_hash())
 
-        # 串行 hash
-        start = time.time()
-        serial_hash = tree_serial._serial_hash()
-        serial_time = time.time() - start
+            self.assertEqual(h_serial, h_parallel, "串行与多线程并行 hash 不一致")
+            self.assertEqual(h_serial, h_async, "串行与 asyncio 并发 hash 不一致")
 
-        # 并行 hash
-        start = time.time()
-        parallel_hash = tree_parallel._parallel_hash()
-        parallel_time = time.time() - start
+    def test_move_dataset_keeps_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
 
-        # asyncio hash
-        start = time.time()
-        asycnio_hash = tree_asyncio._async_hash()
-        asycnio_time = time.time() - start
-        print(f"Serial hash time: {serial_time:.4f}s")
-        print(f"Parallel hash time: {parallel_time:.4f}s")
-        print(f"Asyncio hash time: {asycnio_time:.4f}s")
+            src = base / "dataset_src"
+            src.mkdir()
+            _make_dummy_dataset(src)
 
-        # 验证一致性
-        self.assertEqual(
-            len({serial_hash, parallel_hash, asycnio_hash}), 1, "三个 hash 值不一致"
-        )
-        # 清空临时目录（防止下一轮文件残留）
-        for f in self.temp_dir.iterdir():
-            if f.is_file():
-                f.unlink()
-            elif f.is_dir():
-                shutil.rmtree(f)
+            h1 = FileMerkleTree(src)._serial_hash()
 
-    def test_small_files(self):
-        self._run_test(num_files=1000, file_size_kb=50)
+            # mv 到另一位置（同一个临时目录下的另一个路径）
+            dst = base / "dataset_dst"
+            shutil.move(str(src), str(dst))
+            self.assertTrue(dst.exists() and dst.is_dir())
 
-    def test_medium_files(self):
-        self._run_test(num_files=1000, file_size_kb=800)
+            h2 = FileMerkleTree(dst)._serial_hash()
+            self.assertEqual(
+                h1, h2, "整体移动数据集后 hash 应保持不变（只依赖相对结构与内容）"
+            )
 
-    def test_large_dir(self):
-        self._run_test(num_files=10000, file_size_kb=200)
+    def test_empty_dir_rename_changes_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "dataset"
+            root.mkdir()
+            paths = _make_dummy_dataset(root)
 
-    def test_large_files(self):
-        self._run_test(num_files=1000, file_size_kb=3 * 1024)
+            h_before = FileMerkleTree(root)._serial_hash()
 
-    def test_very_large_files(self):
-        self._run_test(num_files=100, file_size_kb=10 * 1024)
+            empty_dir = paths["empty_dir"]
+            empty_dir_parent = paths["empty_dir_parent"]
+            renamed = empty_dir_parent / "empty_dir_renamed"
+
+            # 重命名空目录
+            empty_dir.rename(renamed)
+
+            # 注意：必须重建树（Node.hash 是 cached_property，旧实例会缓存）
+            h_after = FileMerkleTree(root)._serial_hash()
+
+            self.assertNotEqual(h_before, h_after, "空目录改名后 hash 应发生变化")
+
+    def test_file_rename_changes_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "dataset"
+            root.mkdir()
+            paths = _make_dummy_dataset(root)
+
+            h_before = FileMerkleTree(root)._serial_hash()
+
+            file_small = paths["file_small"]
+            renamed = file_small.with_name("small_renamed.txt")
+
+            # 改名但内容不变
+            file_small.rename(renamed)
+
+            h_after = FileMerkleTree(root)._serial_hash()
+            self.assertNotEqual(
+                h_before,
+                h_after,
+                "文件改名后 hash 应发生变化（因为 hash_file 包含相对路径）",
+            )
+
+    def test_get_hash_branches_still_consistent(self) -> None:
+        """
+        额外覆盖一下 get_hash 自动选择分支：
+        - 用不同 size_threshold 触发串行 or 并行
+        - 验证最终 root hash 一致
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "dataset"
+            root.mkdir()
+            _make_dummy_dataset(root)
+
+            t1 = FileMerkleTree(root)
+            # threshold 很大 -> 绝大部分文件 < threshold -> 倾向串行
+            h_serial_like = t1.get_hash(size_threshold=10 * 1024 * 1024, max_workers=8)
+
+            t2 = FileMerkleTree(root)
+            # threshold 很小 -> 绝大部分文件 >= threshold -> 倾向并行
+            h_parallel_like = t2.get_hash(size_threshold=1, max_workers=8)
+
+            t3 = FileMerkleTree(root)
+            h_async = asyncio.run(t3.get_hash_async(size_threshold=1))
+
+            self.assertEqual(
+                h_serial_like, h_parallel_like, "get_hash 不同分支结果不一致"
+            )
+            self.assertEqual(
+                h_parallel_like, h_async, "get_hash 与 get_hash_async 结果不一致"
+            )
 
 
 if __name__ == "__main__":
