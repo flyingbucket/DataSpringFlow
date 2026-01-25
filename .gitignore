@@ -1,3 +1,10 @@
+# python
 *.egg-info
 *__pycache__
+
+# rust 
+rust/*/target
+rust/*/Cargo.lock
+
+# ide and tools
 .vscode/
