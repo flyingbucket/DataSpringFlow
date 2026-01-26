@@ -1,11 +1,11 @@
 [package]
-name = "file_merkle_tree"
+name = "merkle"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "file_merkle_tree"
-crate-type = ["cdylib"]
+name = "merkle"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pyo3 = { version = "0.27", features = ["extension-module"] }
