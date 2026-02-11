@@ -1,2 +1,8 @@
 *.egg-info
 *__pycache__
+
+# ide 
+.vscode/
+
+# rust 
+rust/target/
