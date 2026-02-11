@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Generator, Union
 
-from dataspringflow.core.metadata import Metadata
+from .metadata import Metadata
 
 from .merkle import FileMerkleTree
 from .registry import DSFRegistry

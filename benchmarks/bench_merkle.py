@@ -3,6 +3,7 @@ import statistics
 import time
 import tempfile
 from pathlib import Path
+from typing import Any, Callable
 
 from dataspringflow.core.merkle import FileMerkleTree
 
@@ -21,8 +22,8 @@ def make_files(root: Path, n: int, size: int, prefix: str) -> None:
                 remaining -= w
 
 
-def time_call(fn, repeat: int = 3) -> float:
-    times = []
+def time_call(fn: Callable[..., Any], repeat: int = 3) -> float:
+    times: list[float] = []
     for _ in range(repeat):
         t0 = time.perf_counter()
         fn()
