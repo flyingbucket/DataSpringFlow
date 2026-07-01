@@ -1,12 +1,6 @@
-use crate::merkle;
-
 use super::merkle::FileMerkleTree;
-use std::{
-    fs::{self, File},
-    io,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{io, path::PathBuf};
+
 pub struct MetaData {
     pub name: String,
     pub tag: String,
@@ -36,7 +30,7 @@ impl MetaData {
         if tag.contains('@') {
             panic!("Metadata.tag must not contain '@': {}", tag);
         }
-        let merkle_tree = FileMerkleTree::new(path.clone())?;
+        let mut merkle_tree = FileMerkleTree::new(path.clone())?;
         let hash = merkle_tree.get_hash()?;
         let meta = Self {
             name: name.to_string(),
