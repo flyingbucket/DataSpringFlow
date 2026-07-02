@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use walkdir::WalkDir;
 
+pub type HashRes = [u8; 32];
 pub struct FileMerkleTree {
     pub root_path: Arc<PathBuf>,
     pub entries: Vec<FileEntry>,
@@ -14,7 +15,7 @@ pub struct FileMerkleTree {
 pub struct FileEntry {
     pub rel_path: PathBuf,
     pub file_type: fs::FileType,
-    pub hash: String,
+    pub hash: HashRes,
 }
 
 impl FileMerkleTree {
@@ -33,7 +34,7 @@ impl FileMerkleTree {
             entries.push(FileEntry {
                 rel_path,
                 file_type: entry.file_type(),
-                hash: String::new(),
+                hash: [0u8; 32],
             });
         }
 
@@ -72,7 +73,7 @@ impl FileMerkleTree {
         root_path: &Path,
         entry: &FileEntry,
         visited: &mut HashSet<PathBuf>,
-    ) -> io::Result<String> {
+    ) -> io::Result<HashRes> {
         let mut hasher = blake3::Hasher::new();
 
         let rel_path_str = entry.rel_path.to_string_lossy().replace('\\', "/");
@@ -92,6 +93,7 @@ impl FileMerkleTree {
             // dir
             (false, true, false) => {
                 hasher.update(b"[DIR]");
+                hasher.update(entry.rel_path.to_string_lossy().as_bytes());
             }
             // symlink
             (false, false, true) => {
@@ -99,14 +101,11 @@ impl FileMerkleTree {
 
                 // unwrap multipul layers of symlink and find the final abs path
                 let canonical_path = fs::canonicalize(&full_path)?;
-
                 let target_metadata = fs::metadata(&canonical_path)?;
-
                 if target_metadata.is_file() {
                     let mut file = File::open(&canonical_path)?;
                     Self::hash_file_content(&mut file, &mut hasher)?;
                 } else if target_metadata.is_dir() {
-                    // 环路检测：如果该真实路径已经在当前的递归祖先链中，说明存在循环引用，抛出错误
                     if visited.contains(&canonical_path) {
                         return Err(io::Error::new(
                             io::ErrorKind::Unsupported,
@@ -114,19 +113,17 @@ impl FileMerkleTree {
                         ));
                     }
 
-                    visited.insert(canonical_path.clone()); // 【入栈】：记录当前正在向下递归的真实目录
+                    // push into stack every time following a symlink
+                    visited.insert(canonical_path.clone());
 
-                    let mut sub_tree = FileMerkleTree::new(canonical_path.clone())?; // 递归为该目标目录创建一棵新的 FileMerkleTree
+                    let mut sub_tree = FileMerkleTree::new(canonical_path.clone())?;
 
-                    // 【关键修改】：分两步走，先 Map 算叶子，再 Reduce 算真实的多叉树哈希
                     sub_tree.map_flat_hash_internal(visited)?;
                     let sub_hash = sub_tree.reduce_into_file_tree_form()?;
 
-                    // 【出栈/回溯】：计算完成，将其从当前链中移出
                     visited.remove(&canonical_path);
 
-                    // 将子树的根哈希作为该软链接的“内容凭证”
-                    hasher.update(sub_hash.as_bytes());
+                    hasher.update(&sub_hash);
                 } else {
                     println!(
                         "Warning: Symlink points to an unsupported file type at {:?}",
@@ -144,7 +141,7 @@ impl FileMerkleTree {
             }
         }
 
-        Ok(hasher.finalize().to_hex().to_string())
+        Ok(hasher.finalize().into())
     }
 
     fn map_flat_hash(&mut self) -> io::Result<()> {
@@ -165,8 +162,6 @@ impl FileMerkleTree {
         self.entries.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
         let root_path = Arc::clone(&self.root_path);
 
-        // 串行计算所有独立叶子节点（如果是目录，这里会算出一个 "[DIR]" 的临时占位哈希）
-        // 未来如果要引入 rayon，只需将这里的 iter_mut() 改为 par_iter_mut() 即可起飞
         for entry in self.entries.iter_mut() {
             entry.hash = Self::hash_single_entry(&root_path, entry, visited)?;
         }
@@ -174,22 +169,21 @@ impl FileMerkleTree {
         Ok(())
     }
 
-    fn reduce_into_file_tree_form(&mut self) -> io::Result<String> {
+    fn reduce_into_file_tree_form(&mut self) -> io::Result<HashRes> {
         if self.entries.is_empty() {
-            return Ok(blake3::hash(b"empty_tree").to_hex().to_string());
+            return Ok(blake3::hash(b"empty_tree").into());
         }
 
-        // 1. 按路径深度降序排序（最深的文件/文件夹排在最前面，Root 节点最后处理）
+        // 1. 按路径深度降序排序
         self.entries
             .sort_by_key(|entry| std::cmp::Reverse(entry.rel_path.components().count()));
 
-        // 2. 准备所有目录的“收件箱” (Inbox)
-        // Key: 父目录的 rel_path, Value: 子项列表 (节点名称, 是否为目录, 哈希值)
-        let mut inbox: HashMap<PathBuf, Vec<(String, bool, String)>> = HashMap::new();
-        let mut final_root_hash = String::new();
+        // inbox is a  HashMap.
+        // Key: parent  path; Value: a Vec of chields, each element contains 3 properties <name, is it a dir, hash res>
+        let mut inbox: HashMap<PathBuf, Vec<(String, bool, HashRes)>> = HashMap::new();
+        let mut final_root_hash = [0u8; 32];
 
         for entry in self.entries.iter_mut() {
-            // WalkDir 遍历的根目录在 strip_prefix 后为空路径 ""
             let is_root = entry.rel_path.as_os_str().is_empty();
 
             let name = if is_root {
@@ -209,55 +203,48 @@ impl FileMerkleTree {
                 .unwrap_or(Path::new(""))
                 .to_path_buf();
 
-            // 如果当前条目是目录，说明比它更深的子项都已经遍历过了，并且把数据投递到了它的收件箱中
             if entry.file_type.is_dir() {
                 let mut children = inbox.remove(&entry.rel_path).unwrap_or_default();
-
-                // N-ary 多叉树核心规则：子项必须按名称字典序严格排序，确保哈希的绝对确定性
                 children.sort_by(|a, b| a.0.cmp(&b.0));
 
                 let mut hasher = blake3::Hasher::new();
                 for child in children {
-                    hasher.update(child.0.as_bytes()); // 绑定子项名称
-                    hasher.update(child.2.as_bytes()); // 绑定子项哈希
-                    hasher.update(if child.1 { &[1] } else { &[0] }); // 绑定类型标识
+                    hasher.update(child.0.as_bytes()); // child name
+                    hasher.update(&child.2); // chile hash
+                    hasher.update(if child.1 { &[1] } else { &[0] }); // child file type tag 
                 }
-
-                // 将重新计算出的真实多叉树哈希，覆盖掉原本 map_flat_hash 留下的占位符
-                entry.hash = hasher.finalize().to_hex().to_string();
+                entry.hash = hasher.finalize().into();
             }
 
             if is_root {
-                final_root_hash = entry.hash.clone();
+                final_root_hash = entry.hash;
             } else {
-                // 将自己（文件或算完哈希的子目录）投递给上级目录的收件箱
                 inbox.entry(parent_path).or_default().push((
                     name,
                     entry.file_type.is_dir(),
-                    entry.hash.clone(),
+                    entry.hash, // 直接拷贝 [u8; 32]
                 ));
             }
         }
 
-        // 3. 兜底逻辑：在某些特殊遍历行为下，WalkDir 可能不显式 yield 根目录本身。
-        // 如果 final_root_hash 仍为空，说明树的第一层文件都在 key 为 "" 的收件箱里。
-        if final_root_hash.is_empty() {
+        // 兜底逻辑
+        if final_root_hash == [0u8; 32] && !self.entries.is_empty() {
             let mut children = inbox.remove(Path::new("")).unwrap_or_default();
             children.sort_by(|a, b| a.0.cmp(&b.0));
 
             let mut hasher = blake3::Hasher::new();
             for child in children {
                 hasher.update(child.0.as_bytes());
-                hasher.update(child.2.as_bytes());
+                hasher.update(&child.2);
                 hasher.update(if child.1 { &[1] } else { &[0] });
             }
-            final_root_hash = hasher.finalize().to_hex().to_string();
+            final_root_hash = hasher.finalize().into();
         }
 
         Ok(final_root_hash)
     }
 
-    pub fn get_hash(&mut self) -> io::Result<String> {
+    pub fn get_hash(&mut self) -> io::Result<HashRes> {
         // Map: hash file tree leaf node(file, empty dir, symlink)
         self.map_flat_hash()?;
 
