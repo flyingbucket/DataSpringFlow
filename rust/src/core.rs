@@ -1,10 +1,10 @@
-use super::merkle::FileMerkleTree;
+use super::merkle::{FileMerkleTree, HashRes};
 use std::{io, path::PathBuf};
 
 pub struct MetaData {
     pub name: String,
     pub tag: String,
-    pub hash: String,
+    pub hash: HashRes,
     pub path: PathBuf,
     pub description_path: PathBuf,
     pub script_path: PathBuf,

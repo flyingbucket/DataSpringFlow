@@ -1,5 +1,5 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
+use rayon::prelude::*;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -19,6 +19,48 @@ pub struct FileEntry {
 }
 
 impl FileMerkleTree {
+    fn validate_symlink_cycles(&self) -> io::Result<()> {
+        let mut stack = HashSet::new();
+        let root = fs::canonicalize(&*self.root_path)?;
+        Self::detect_cycles_in_dir(&root, &mut stack)
+    }
+    fn detect_cycles_in_dir(dir: &Path, stack: &mut HashSet<PathBuf>) -> io::Result<()> {
+        let canonical_dir = fs::canonicalize(dir)?;
+
+        if !stack.insert(canonical_dir.clone()) {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                format!("Circular symlink detected at {:?}", canonical_dir),
+            ));
+        }
+
+        for entry in WalkDir::new(&canonical_dir)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+
+            // 跳过当前目录本身，因为 WalkDir::new(dir) 会先返回 dir 自己
+            if path == canonical_dir {
+                continue;
+            }
+
+            if entry.file_type().is_symlink() {
+                let full_path = path;
+
+                let target_path = fs::canonicalize(full_path)?;
+                let target_meta = fs::metadata(&target_path)?;
+
+                if target_meta.is_dir() {
+                    Self::detect_cycles_in_dir(&target_path, stack)?;
+                }
+            }
+        }
+
+        stack.remove(&canonical_dir);
+        Ok(())
+    }
     pub fn new(root_path: PathBuf) -> std::io::Result<Self> {
         let root_arc = Arc::new(root_path);
         let mut entries = Vec::new();
@@ -38,10 +80,12 @@ impl FileMerkleTree {
             });
         }
 
-        Ok(FileMerkleTree {
+        let tree = FileMerkleTree {
             root_path: root_arc,
             entries,
-        })
+        };
+        tree.validate_symlink_cycles()?;
+        Ok(tree)
     }
 
     fn hash_file_content(file: &mut File, hasher: &mut blake3::Hasher) -> io::Result<()> {
@@ -69,11 +113,7 @@ impl FileMerkleTree {
         Ok(())
     }
 
-    fn hash_single_entry(
-        root_path: &Path,
-        entry: &FileEntry,
-        visited: &mut HashSet<PathBuf>,
-    ) -> io::Result<HashRes> {
+    fn hash_single_entry(root_path: &Path, entry: &FileEntry) -> io::Result<HashRes> {
         let mut hasher = blake3::Hasher::new();
 
         let rel_path_str = entry.rel_path.to_string_lossy().replace('\\', "/");
@@ -106,23 +146,8 @@ impl FileMerkleTree {
                     let mut file = File::open(&canonical_path)?;
                     Self::hash_file_content(&mut file, &mut hasher)?;
                 } else if target_metadata.is_dir() {
-                    if visited.contains(&canonical_path) {
-                        return Err(io::Error::new(
-                            io::ErrorKind::Unsupported,
-                            format!("Circular symlink detected at {:?}", full_path),
-                        ));
-                    }
-
-                    // push into stack every time following a symlink
-                    visited.insert(canonical_path.clone());
-
                     let mut sub_tree = FileMerkleTree::new(canonical_path.clone())?;
-
-                    sub_tree.map_flat_hash_internal(visited)?;
-                    let sub_hash = sub_tree.reduce_into_file_tree_form()?;
-
-                    visited.remove(&canonical_path);
-
+                    let sub_hash = sub_tree.get_hash()?;
                     hasher.update(&sub_hash);
                 } else {
                     println!(
@@ -145,16 +170,6 @@ impl FileMerkleTree {
     }
 
     fn map_flat_hash(&mut self) -> io::Result<()> {
-        let mut visited = HashSet::new();
-
-        if let Ok(canonical_root) = fs::canonicalize(&**self.root_path) {
-            visited.insert(canonical_root);
-        }
-
-        self.map_flat_hash_internal(&mut visited)
-    }
-
-    fn map_flat_hash_internal(&mut self, visited: &mut HashSet<PathBuf>) -> io::Result<()> {
         if self.entries.is_empty() {
             return Ok(());
         }
@@ -162,11 +177,10 @@ impl FileMerkleTree {
         self.entries.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
         let root_path = Arc::clone(&self.root_path);
 
-        for entry in self.entries.iter_mut() {
-            entry.hash = Self::hash_single_entry(&root_path, entry, visited)?;
-        }
-
-        Ok(())
+        self.entries.par_iter_mut().try_for_each(|entry| {
+            entry.hash = Self::hash_single_entry(&root_path, entry)?;
+            Ok(())
+        })
     }
 
     fn reduce_into_file_tree_form(&mut self) -> io::Result<HashRes> {
@@ -174,7 +188,6 @@ impl FileMerkleTree {
             return Ok(blake3::hash(b"empty_tree").into());
         }
 
-        // 1. 按路径深度降序排序
         self.entries
             .sort_by_key(|entry| std::cmp::Reverse(entry.rel_path.components().count()));
 
@@ -227,7 +240,7 @@ impl FileMerkleTree {
             }
         }
 
-        // 兜底逻辑
+        // 兜底
         if final_root_hash == [0u8; 32] && !self.entries.is_empty() {
             let mut children = inbox.remove(Path::new("")).unwrap_or_default();
             children.sort_by(|a, b| a.0.cmp(&b.0));
