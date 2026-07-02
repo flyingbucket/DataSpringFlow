@@ -1,4 +1,5 @@
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Read};
@@ -7,6 +8,7 @@ use std::sync::Arc;
 use walkdir::WalkDir;
 
 pub type HashRes = [u8; 32];
+
 pub struct FileMerkleTree {
     pub root_path: Arc<PathBuf>,
     pub entries: Vec<FileEntry>,
@@ -18,12 +20,24 @@ pub struct FileEntry {
     pub hash: HashRes,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct FileEntrySnapshot {
+    pub path: PathBuf,
+    pub hash: HashRes,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct MerkleTreeSnapshot {
+    pub entries: Vec<FileEntrySnapshot>,
+}
+
 impl FileMerkleTree {
     fn validate_symlink_cycles(&self) -> io::Result<()> {
         let mut stack = HashSet::new();
         let root = fs::canonicalize(&*self.root_path)?;
         Self::detect_cycles_in_dir(&root, &mut stack)
     }
+
     fn detect_cycles_in_dir(dir: &Path, stack: &mut HashSet<PathBuf>) -> io::Result<()> {
         let canonical_dir = fs::canonicalize(dir)?;
 
@@ -61,6 +75,7 @@ impl FileMerkleTree {
         stack.remove(&canonical_dir);
         Ok(())
     }
+
     pub fn new(root_path: PathBuf) -> std::io::Result<Self> {
         let root_arc = Arc::new(root_path);
         let mut entries = Vec::new();
@@ -264,8 +279,35 @@ impl FileMerkleTree {
         // Reduce: hash inner node
         self.reduce_into_file_tree_form()
     }
+
+    pub fn to_snapshot(&self) -> MerkleTreeSnapshot {
+        let entries = self
+            .entries
+            .iter()
+            .map(|e| FileEntrySnapshot {
+                path: e.rel_path.clone(),
+                hash: e.hash,
+            })
+            .collect();
+
+        MerkleTreeSnapshot { entries }
+    }
+
+    pub fn save_to_disk(&self, path: &Path) -> io::Result<()> {
+        let snapshot = self.to_snapshot();
+        let file = File::create(path)?;
+        bincode::serialize_into(file, &snapshot).map_err(|e| io::Error::other(e.to_string()))
+    }
 }
 
+impl MerkleTreeSnapshot {
+    pub fn load_from_disk<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+        let file = File::open(path)?;
+        let reader = std::io::BufReader::new(file);
+        bincode::deserialize_from(reader)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
