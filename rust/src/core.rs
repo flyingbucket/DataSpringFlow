@@ -1,10 +1,19 @@
 use crate::{
+    dag::{DatasetGraph, DatasetGraphError},
     merkle::{FileMerkleTree, HashRes, MerkleTreeSnapshot},
     utils::hashres_to_hex,
 };
 use std::collections::HashMap;
 use std::io::{self, Error, ErrorKind};
 use std::path::PathBuf;
+
+pub trait DatasetBackend {
+    /// 根据数据集 ID 获取对应的元数据
+    fn get_metadata(&self, id: &str) -> io::Result<MetaData>;
+
+    /// 保存或更新数据集元数据
+    fn save_metadata(&self, metadata: &MetaData) -> io::Result<()>;
+}
 
 pub struct MetaData {
     pub name: String,
@@ -40,7 +49,7 @@ impl MetaData {
         if tag.contains('@') {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                "Metadata name must not contain '@'",
+                "Metadata tag must not contain '@'",
             ));
         }
         let mut merkle_tree = FileMerkleTree::new(path.clone())?;
@@ -59,11 +68,17 @@ impl MetaData {
 
         Ok(meta)
     }
+
+    pub fn commit(&self, backend: &impl DatasetBackend) -> io::Result<()> {
+        backend.save_metadata(self)?;
+        Ok(())
+    }
 }
 
+/// Runtime dataset struct
 pub struct DSFDataSet {
-    metadata: MetaData,
-    detailed_status: DataSetVerifyRes,
+    pub metadata: MetaData,
+    pub detailed_status: DataSetVerifyRes,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -71,6 +86,7 @@ pub enum DataSetStatus {
     Healthy,
     Broken,
     BrokenDpes,
+    Unverified,
 }
 
 #[derive(Clone)]
@@ -80,44 +96,41 @@ pub struct DataSetVerifyRes {
 }
 
 impl DSFDataSet {
-    pub fn load_from_id(id: String) -> io::Result<Self> {
-        let _ = id;
-        // should load metadata from sqlite accroding to the id,
-        // now sqlite backend is not implemented,
-        // just a mock
-        let bullshit = MetaData::new(
-            "bullshit",
-            "1.0",
-            PathBuf::from("/some/bullshit/data"),
-            PathBuf::from("/nowhere/description.md"),
-            PathBuf::from("/nowhere/script.py"),
-            vec![],
-            PathBuf::from("/data/DSF/merkle/bullshit_1.0.bincode"),
-        )?;
+    pub fn load_from_id(id: &str, backend: &impl DatasetBackend) -> io::Result<Self> {
+        let metadata = backend.get_metadata(id)?;
 
         Ok(DSFDataSet {
-            metadata: bullshit,
+            metadata,
             detailed_status: DataSetVerifyRes {
-                status: DataSetStatus::BrokenDpes,
-                dep_status: vec![], // runtime properity, init with empty Vec
+                status: DataSetStatus::Unverified,
+                dep_status: vec![],
             },
         })
     }
 
-    pub fn verify(&mut self, show_diff: bool) -> io::Result<DataSetVerifyRes> {
+    pub fn verify(
+        &mut self,
+        backend: &impl DatasetBackend,
+        show_diff: bool,
+    ) -> Result<DataSetVerifyRes, DatasetGraphError> {
+        let root_id = self.metadata.id();
+        let mut graph = DatasetGraph::from_root(&root_id, backend)?;
+        let res = graph.verify_subgraph(&root_id, show_diff)?;
+        self.detailed_status = res.clone();
+        Ok(res)
+    }
+
+    pub fn verify_single(
+        &mut self,
+        show_diff: bool,
+        dep_statuses: &[DataSetStatus],
+    ) -> io::Result<DataSetVerifyRes> {
         let mut curr_merkle = FileMerkleTree::new(self.metadata.path.clone())?;
         let curr_hash = hashres_to_hex(curr_merkle.get_hash()?);
 
-        let mut dep_res_vec = Vec::new();
-        for dep_id in &self.metadata.dependencies {
-            let mut dep = Self::load_from_id(dep_id.clone())?;
-            let dep_res = dep.verify(show_diff)?;
-            dep_res_vec.push(dep_res);
-        }
-
-        let all_deps_healthy = dep_res_vec
+        let all_deps_healthy = dep_statuses
             .iter()
-            .all(|res| res.status == DataSetStatus::Healthy);
+            .all(|&status| status == DataSetStatus::Healthy);
 
         let self_status = if curr_hash == self.metadata.hash && all_deps_healthy {
             DataSetStatus::Healthy
@@ -132,15 +145,16 @@ impl DSFDataSet {
             DataSetStatus::BrokenDpes
         };
 
-        let dep_status = dep_res_vec.iter().map(|res| res.status).collect();
         let detailed_status = DataSetVerifyRes {
             status: self_status,
-            dep_status,
+            dep_status: dep_statuses.to_vec(),
         };
+
         self.detailed_status = detailed_status.clone();
         Ok(detailed_status)
     }
 
+    /// TODO: need UI or frontend refactor
     pub fn find_differences(&self, old_tree: &MerkleTreeSnapshot, current_tree: &FileMerkleTree) {
         let old_map: HashMap<PathBuf, HashRes> = old_tree
             .entries
