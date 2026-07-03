@@ -8,6 +8,8 @@ use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::io;
+use std::io::Error;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -76,24 +78,19 @@ impl SqliteBackend {
         Self::from_config(cfg)
     }
 
-    /// 允许你在测试/特殊场景直接传配置
+    /// 允许在测试/特殊场景直接传配置
     pub fn from_config(cfg: SqliteConfig) -> io::Result<Self> {
-        if let Some(parent) = cfg.db_path.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = cfg.db_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent)?;
         }
 
         let manager = SqliteConnectionManager::file(&cfg.db_path);
         let pool = Pool::builder()
             .max_size(cfg.pool_size)
             .build(manager)
-            .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("build sqlite pool failed: {e}"),
-                )
-            })?;
+            .map_err(|e| Error::other(format!("build sqlite pool failed: {e}")))?;
 
         let backend = Self { cfg, pool };
         backend.init()?;
@@ -128,54 +125,39 @@ impl SqliteBackend {
     }
 
     fn load_yaml(path: &Path) -> io::Result<AppConfig> {
-        let content = fs::read_to_string(path).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("read config failed ({}): {e}", path.display()),
-            )
-        })?;
+        let content = fs::read_to_string(path)
+            .map_err(|e| Error::other(format!("read config failed ({}): {e}", path.display())))?;
 
         serde_yaml::from_str::<AppConfig>(&content).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
+            Error::new(
+                ErrorKind::InvalidData,
                 format!("parse config yaml failed ({}): {e}", path.display()),
             )
         })
     }
 
     fn conn(&self) -> io::Result<PooledConnection<SqliteConnectionManager>> {
-        let conn = self.pool.get().map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("get sqlite connection from pool failed: {e}"),
-            )
-        })?;
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| Error::other(format!("get sqlite connection from pool failed: {e}")))?;
 
-        self.apply_pragmas(&conn)?; // &PooledConnection 可解引用为 &Connection
+        self.apply_pragmas(&conn)?;
         Ok(conn)
     }
+
     fn apply_pragmas(&self, conn: &Connection) -> io::Result<()> {
         conn.busy_timeout(Duration::from_millis(self.cfg.busy_timeout_ms))
-            .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("set busy_timeout failed: {e}"),
-                )
-            })?;
+            .map_err(|e| Error::other(format!("set busy_timeout failed: {e}")))?;
 
         let wal_mode = if self.cfg.wal { "WAL" } else { "DELETE" };
-        conn.pragma_update(None, "journal_mode", &wal_mode)
-            .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("set journal_mode failed: {e}"),
-                )
-            })?;
+        conn.pragma_update(None, "journal_mode", wal_mode)
+            .map_err(|e| Error::other(format!("set journal_mode failed: {e}")))?;
 
         let sync = self.cfg.synchronous.to_uppercase();
         if sync != "NORMAL" && sync != "FULL" {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
                 format!(
                     "invalid synchronous value: {}, expected NORMAL or FULL",
                     self.cfg.synchronous
@@ -183,17 +165,11 @@ impl SqliteBackend {
             ));
         }
         conn.pragma_update(None, "synchronous", &sync)
-            .map_err(|e| {
-                io::Error::new(io::ErrorKind::Other, format!("set synchronous failed: {e}"))
-            })?;
+            .map_err(|e| Error::other(format!("set synchronous failed: {e}")))?;
 
         let fk = if self.cfg.foreign_keys { "ON" } else { "OFF" };
-        conn.pragma_update(None, "foreign_keys", &fk).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("set foreign_keys failed: {e}"),
-            )
-        })?;
+        conn.pragma_update(None, "foreign_keys", fk)
+            .map_err(|e| Error::other(format!("set foreign_keys failed: {e}")))?;
 
         Ok(())
     }
@@ -218,7 +194,7 @@ impl SqliteBackend {
             ON datasets(name, tag);
             "#,
         )
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("init schema failed: {e}")))?;
+        .map_err(|e| Error::other(format!("init schema failed: {e}")))?;
         Ok(())
     }
 }
@@ -266,11 +242,11 @@ impl DatasetBackend for SqliteBackend {
                 },
             )
             .optional()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("query metadata failed: {e}")))?;
+            .map_err(|e| Error::other(format!("query metadata failed: {e}")))?;
 
         row.ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
+            Error::new(
+                ErrorKind::NotFound,
                 format!("dataset metadata not found: {id}"),
             )
         })
@@ -280,19 +256,16 @@ impl DatasetBackend for SqliteBackend {
         let mut conn = self.conn()?;
 
         let deps_json = serde_json::to_string(&metadata.dependencies).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
+            Error::new(
+                ErrorKind::InvalidData,
                 format!("serialize deps failed: {e}"),
             )
         })?;
 
         // ACID: 用事务保证原子性；失败自动回滚
-        let tx = conn.transaction().map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("begin transaction failed: {e}"),
-            )
-        })?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| Error::other(format!("begin transaction failed: {e}")))?;
 
         tx.execute(
             r#"
@@ -321,14 +294,10 @@ impl DatasetBackend for SqliteBackend {
                 metadata.merkle_tree_path.to_string_lossy(),
             ],
         )
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("save metadata failed: {e}")))?;
+        .map_err(|e| Error::other(format!("save metadata failed: {e}")))?;
 
-        tx.commit().map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("commit transaction failed: {e}"),
-            )
-        })?;
+        tx.commit()
+            .map_err(|e| Error::other(format!("commit transaction failed: {e}")))?;
 
         Ok(())
     }
