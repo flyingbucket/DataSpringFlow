@@ -13,6 +13,13 @@ pub trait DatasetBackend {
 
     /// 保存或更新数据集元数据
     fn save_metadata(&self, metadata: &MetaData) -> io::Result<()>;
+
+    /// 检查是否有任何数据集依赖了指定的 target_id
+    fn check_is_referenced(&self, target_id: &str) -> io::Result<Vec<String>>;
+
+    fn list_all_metadata(&self) -> io::Result<Vec<MetaData>>;
+
+    fn delete_metadata(&self, id: &str) -> io::Result<()>;
 }
 
 #[derive(Clone, Debug)]

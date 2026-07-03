@@ -301,4 +301,37 @@ impl DatasetBackend for SqliteBackend {
 
         Ok(())
     }
+
+    /// 检查是否有任何数据集依赖了指定的 target_id
+    fn check_is_referenced(&self, target_id: &str) -> io::Result<Vec<String>> {
+        let conn = self.conn()?;
+        // 在 JSON 数组中查找，构造带双引号的子串，防止短名字误匹配（如匹配 "id1" 不会命中 "id10"）
+        let pattern = format!("%\"{}\"%", target_id);
+
+        let mut stmt = conn
+            .prepare("SELECT name, tag FROM datasets WHERE dependencies_json LIKE ?1")
+            .map_err(|e| Error::other(e.to_string()))?;
+
+        let rows = stmt
+            .query_map([pattern], |row| {
+                let name: String = row.get(0)?;
+                let tag: String = row.get(1)?;
+                Ok(format!("{}@{}", name, tag))
+            })
+            .map_err(|e| Error::other(e.to_string()))?;
+
+        let mut parents = Vec::new();
+        for r in rows {
+            parents.push(r.map_err(|e| Error::other(e.to_string()))?);
+        }
+        Ok(parents)
+    }
+
+    fn list_all_metadata(&self) -> io::Result<Vec<MetaData>> {
+        todo!("list_all_metadata not implemented yet")
+    }
+
+    fn delete_metadata(&self, _id: &str) -> io::Result<()> {
+        todo!("delete_metadata not implemented yet")
+    }
 }

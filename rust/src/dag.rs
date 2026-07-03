@@ -78,6 +78,67 @@ impl DatasetGraph {
         Ok(graph)
     }
 
+    /// Build a temporary graph for "new dataset registration" scenario.
+    /// Root node is virtual/new (name@tag), with dependencies provided by caller.
+    /// All dependency nodes must exist in backend metadata.
+    pub fn from_root_with_deps(
+        name: &str,
+        tag: &str,
+        dependencies: &[String],
+        backend: &impl DatasetBackend,
+    ) -> Result<Self, DatasetGraphError> {
+        if name.contains('@') || tag.contains('@') {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "name/tag must not contain '@'",
+            )
+            .into());
+        }
+
+        let root_id = format!("{}@{}", name, tag);
+        let mut graph = Self::new();
+
+        // 1) Insert virtual root adjacency first
+        graph
+            .adj_list
+            .insert(root_id.clone(), dependencies.to_vec());
+
+        // 2) Traverse all reachable deps from root
+        let mut to_visit: Vec<String> = dependencies.to_vec();
+        let mut visited: HashSet<String> = HashSet::new();
+
+        while let Some(curr_id) = to_visit.pop() {
+            if !visited.insert(curr_id.clone()) {
+                continue;
+            }
+
+            // dependency must exist in backend
+            let dataset = DSFDataSet::load_from_id(&curr_id, backend).map_err(|e| {
+                if e.kind() == io::ErrorKind::NotFound {
+                    DatasetGraphError::DatasetNotFound {
+                        node_id: curr_id.clone(),
+                    }
+                } else {
+                    DatasetGraphError::Io(e)
+                }
+            })?;
+
+            let deps = dataset.metadata.dependencies.clone();
+
+            // record node + edges
+            graph.adj_list.insert(curr_id.clone(), deps.clone());
+            graph.datasets.insert(curr_id.clone(), dataset);
+
+            // continue DFS/BFS
+            for dep_id in deps {
+                if !visited.contains(&dep_id) {
+                    to_visit.push(dep_id);
+                }
+            }
+        }
+
+        Ok(graph)
+    }
     /// detect cycle in dependencies
     pub fn check_cycle(&self) -> Result<(), DatasetGraphError> {
         let mut color = HashMap::new();

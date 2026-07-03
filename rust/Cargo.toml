@@ -12,15 +12,27 @@ pyo3 = { version = "0.29.0", features = ["extension-module", "abi3-py39"] }
 walkdir = "2"
 rayon = "1.12"
 blake3 = { version = "1.8", features = ["traits-preview", "rayon", "mmap"] }
-bincode = "1"
 thiserror = "2"
-serde_json = "1"
+directories = "6"
+
+# sqlite
 rusqlite = { version = "0.39", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.34.0"
+
+# serielize
+bincode = "1"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
+serde_json = "1"
 dirs = "6"
+
+# cli
+clap = { version = "4", features = ["derive"] }
+dialoguer = "0.12"                              # 交互式终端提示（选择、确认框）
+colored = "3"                                   # 终端文字着色
+anyhow = "1.0.103"
+libc = "0.2.186"
 
 [dev-dependencies]
 tempfile = "3"
