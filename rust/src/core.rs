@@ -15,6 +15,7 @@ pub trait DatasetBackend {
     fn save_metadata(&self, metadata: &MetaData) -> io::Result<()>;
 }
 
+#[derive(Clone)]
 pub struct MetaData {
     pub name: String,
     pub tag: String,
