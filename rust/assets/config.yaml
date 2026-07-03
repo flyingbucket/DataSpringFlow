@@ -1,0 +1,7 @@
+sqlite:
+  db_path: "/tmp/dsf/datasets.db"
+  pool_size: 8
+  busy_timeout_ms: 5000
+  wal: true
+  synchronous: "NORMAL" # NORMAL 或 FULL
+  foreign_keys: true

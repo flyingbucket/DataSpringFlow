@@ -1,6 +1,6 @@
 use crate::core::{DSFDataSet, DataSetVerifyRes, DatasetBackend};
 use std::collections::{HashMap, HashSet};
-use std::io::{self, Error, ErrorKind};
+use std::io;
 
 pub struct DatasetGraph {
     /// 存储参与本次校验的数据集实例
