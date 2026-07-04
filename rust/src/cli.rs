@@ -5,8 +5,9 @@ use dialoguer::{Confirm, Input, Select};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::backend::DatasetBackend;
 use crate::backend::SqliteBackend;
-use crate::core::{DSFDataSet, DataSetStatus, DatasetBackend, MetaData};
+use crate::core::{DSFDataSet, DataSetStatus, MetaData};
 use crate::dag::DatasetGraph;
 use crate::merkle::FileMerkleTree;
 use crate::utils::{AppEnv, hashres_to_hex};
@@ -14,7 +15,8 @@ use crate::utils::{AppEnv, hashres_to_hex};
 #[derive(Parser, Debug)]
 #[command(
     name = "dsf",
-    about = "DataSpringFlow: AI 数据集版本与依赖管理工具",
+    about = "DataSpringFlow: dataset assets managment tool 
+featuring DAG linage and blake hash verification.",
     version
 )]
 pub struct Cli {
@@ -105,19 +107,33 @@ pub fn run(cli: Cli) -> Result<()> {
             dependencies,
             force_heal,
             yes,
-        } => handle_register(
-            &name,
-            &tag,
-            path,
-            script_path,
-            description_path,
-            dependencies,
-            force_heal,
-            yes,
-        ),
+        } => {
+            let opts = RegisterOptions {
+                name,
+                tag,
+                path,
+                script_path,
+                description_path,
+                dependencies,
+                force_heal,
+                yes,
+            };
+            handle_register(opts)
+        }
         Commands::Update { id } => handle_update(&id),
         Commands::Delete { id, force, yes } => handle_delete(&id, force, yes),
     }
+}
+
+pub struct RegisterOptions {
+    pub name: String,
+    pub tag: String,
+    pub path: PathBuf,
+    pub script_path: PathBuf,
+    pub description_path: Option<PathBuf>,
+    pub dependencies: Vec<String>,
+    pub force_heal: bool,
+    pub yes: bool,
 }
 
 fn handle_init(global_flag: bool, yes: bool) -> Result<()> {
@@ -252,42 +268,38 @@ fn handle_status(id: &str, level: VerifyLevel, show_diff: bool) -> Result<()> {
     Ok(())
 }
 
-fn handle_register(
-    name: &str,
-    tag: &str,
-    path: PathBuf,
-    script_path: PathBuf,
-    description_path: Option<PathBuf>,
-    dependencies: Vec<String>,
-    force_heal: bool,
-    yes: bool,
-) -> Result<()> {
-    validate_name_tag(name, tag)?;
-    ensure_exists(&path, "--path")?;
-    ensure_exists(&script_path, "--script-path")?;
-    if let Some(ref d) = description_path {
+fn handle_register(opts: RegisterOptions) -> Result<()> {
+    // 1. 验证阶段：直接通过 opts 访问字段
+    validate_name_tag(&opts.name, &opts.tag)?;
+    ensure_exists(&opts.path, "--path")?;
+    ensure_exists(&opts.script_path, "--script-path")?;
+    if let Some(ref d) = opts.description_path {
         ensure_exists(d, "--description-path")?;
     }
 
     let backend = SqliteBackend::new()?;
 
     // A) 依赖必须存在
-    for dep_id in &dependencies {
+    for dep_id in &opts.dependencies {
         validate_dataset_id(dep_id)?;
         if backend.get_metadata(dep_id).is_err() {
-            bail!("依赖数据集不存在，拦截注册: {}", dep_id);
+            bail!(
+                "Dependency dataset does not exist, registration intercepted: {}",
+                dep_id
+            );
         }
     }
 
-    // B) DAG 查环（预检查）
-    let graph = DatasetGraph::from_root_with_deps(name, tag, &dependencies, &backend)?;
+    // B) DAG 查环
+    let graph =
+        DatasetGraph::from_root_with_deps(&opts.name, &opts.tag, &opts.dependencies, &backend)?;
     graph.check_cycle()?;
 
     // C) 检查依赖健康
     let mut broken = Vec::new();
-    for dep_id in &dependencies {
+    for dep_id in &opts.dependencies {
         let mut ds = DSFDataSet::load_from_id(dep_id, &backend)?;
-        let res = ds.verify(&backend, false)?; // deep 更稳妥
+        let res = ds.verify(&backend, false)?;
         if res.status != DataSetStatus::Healthy {
             broken.push(dep_id.clone());
         }
@@ -295,48 +307,55 @@ fn handle_register(
 
     // D) 依赖异常 -> heal 决策
     if !broken.is_empty() {
-        println!("{}", "检测到依赖不健康：".yellow().bold());
+        println!(
+            "{}",
+            "Warning: Unhealthy dependencies detected:".yellow().bold()
+        );
         for b in &broken {
             println!("  - {}", b.red());
         }
 
-        let do_heal = if force_heal || yes {
+        let do_heal = if opts.force_heal || opts.yes {
             true
         } else {
             Confirm::new()
-                .with_prompt("是否锁死当前状态并强制 heal 依赖及其深层依赖？")
+                .with_prompt("Do you want to lock the current state and force heal these dependencies (including deep dependencies)?")
                 .default(false)
                 .interact()?
         };
 
         if !do_heal {
-            bail!("用户取消 heal，注册终止");
+            bail!("Heal aborted by user, registration terminated.");
         }
 
-        // 简化版：先 heal 当前依赖列表（深层 heal 可后续在 DAG 里做拓扑遍历）
         for dep_id in &broken {
             let mut ds = DSFDataSet::load_from_id(dep_id, &backend)?;
             let mut new_merkle = FileMerkleTree::new(ds.metadata.path.clone())?;
             ds.metadata.hash = hashres_to_hex(new_merkle.get_hash()?);
             new_merkle.save_to_disk(&ds.metadata.merkle_tree_path)?;
             backend.save_metadata(&ds.metadata)?;
-            println!("  ✔ healed {}", dep_id.green());
+            println!("  ✔ Healed {}", dep_id.green());
         }
     }
 
     // E) 注册新数据集
-    let merkle_tree_path = build_default_merkle_path(name, tag)?;
+    let merkle_tree_path = build_default_merkle_path(&opts.name, &opts.tag)?;
     let meta = MetaData::new(
-        name,
-        tag,
-        path,
-        description_path.unwrap_or_default(),
-        script_path,
-        dependencies,
+        &opts.name,
+        &opts.tag,
+        opts.path,
+        opts.description_path.unwrap_or_default(),
+        opts.script_path,
+        opts.dependencies,
         merkle_tree_path,
     )?;
     backend.save_metadata(&meta)?;
-    println!("{}", format!("✔ 注册成功: {}", meta.id()).green().bold());
+    println!(
+        "{}",
+        format!("Registered successfully: {}", meta.id())
+            .green()
+            .bold()
+    );
 
     Ok(())
 }
@@ -353,7 +372,12 @@ fn handle_update(id: &str) -> Result<()> {
 
     println!(
         "{}",
-        format!("✔ 已更新 {}，新 hash: {}...", id, &ds.metadata.hash[..8]).green()
+        format!(
+            "updated dataset {}，new hash: {}...",
+            id,
+            &ds.metadata.hash[..8]
+        )
+        .green()
     );
     Ok(())
 }
@@ -362,40 +386,56 @@ fn handle_delete(id: &str, force: bool, yes: bool) -> Result<()> {
     validate_dataset_id(id)?;
     let backend = SqliteBackend::new()?;
 
-    // 依赖反查（需要 backend 提供 list_all_metadata）
-    let all = backend
-        .list_all_metadata()
-        .context("后端暂未实现 list_all_metadata，无法做安全删除检查")?;
+    if !force {
+        let referrers = backend
+            .check_is_referenced(id)
+            .context("Backend failed to execute reverse dependency query")?;
 
-    let mut referrers = Vec::new();
-    for m in &all {
-        if m.dependencies.iter().any(|d| d == id) {
-            referrers.push(m.id());
+        if !referrers.is_empty() {
+            println!(
+                "{}",
+                "Deletion intercepted: This dataset is depended on by the following items:"
+                    .red()
+                    .bold()
+            );
+            for r in referrers {
+                println!("  - {}", r);
+            }
+            // 中文: "如需强制删除请使用 --force"
+            bail!("Use --force if you want to force deletion");
         }
     }
 
-    if !referrers.is_empty() && !force {
-        println!("{}", "删除被拦截：该数据集被以下条目依赖".red().bold());
-        for r in referrers {
-            println!("  - {}", r);
-        }
-        bail!("如需强制删除请使用 --force");
-    }
+    // 2. Existence check
+    let metadata = backend
+        .get_metadata(id)
+        // 中文: "未找到 ID 为 {} 的数据集元数据"
+        .context(format!("Dataset metadata not found for ID: {}", id))?;
 
+    // 3. Interactive confirmation
     if !yes {
         let ok = Confirm::new()
-            .with_prompt(format!("确认删除 {} ?", id))
+            // 中文: "确认删除 {} (路径: {:?})?"
+            .with_prompt(format!(
+                "Are you sure you want to delete {} (Path: {:?})?",
+                id, metadata.path
+            ))
             .default(false)
             .interact()?;
         if !ok {
-            bail!("用户取消删除");
+            // 中文: "用户取消删除"
+            bail!("Deletion cancelled by user.");
         }
     }
 
+    // 4. Execute actual deletion
     backend
         .delete_metadata(id)
-        .context("后端暂未实现 delete_metadata 或删除失败")?;
-    println!("{}", format!("✔ 已删除 {}", id).green().bold());
+        // 中文: "后端执行 delete_metadata 失败"
+        .context("Backend failed to execute delete_metadata")?;
+
+    // 中文: "✔ 已删除 {}"
+    println!("{}", format!("✔ Deleted {}", id).green().bold());
 
     Ok(())
 }
@@ -425,24 +465,28 @@ fn fmt_status(s: DataSetStatus) -> String {
 fn validate_dataset_id(id: &str) -> Result<()> {
     let parts: Vec<&str> = id.split('@').collect();
     if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
-        bail!("非法 id: {}，格式必须为 name@tag", id);
+        bail!("Illegal id: {}，must be in form name@tag", id);
     }
     Ok(())
 }
 
 fn validate_name_tag(name: &str, tag: &str) -> Result<()> {
     if name.is_empty() || tag.is_empty() {
-        bail!("name/tag 不能为空");
+        bail!("name/tag should not be empty");
     }
     if name.contains('@') || tag.contains('@') {
-        bail!("name/tag 不允许包含 '@'");
+        bail!("name/tag should not contain '@'");
     }
     Ok(())
 }
 
 fn ensure_exists(p: &Path, arg_name: &str) -> Result<()> {
     if !p.exists() {
-        bail!("{} 指向的路径不存在: {}", arg_name, p.display());
+        bail!(
+            "{} Path doesn't exsit on storage: {}",
+            arg_name,
+            p.display()
+        );
     }
     Ok(())
 }
@@ -453,7 +497,7 @@ fn build_default_merkle_path(name: &str, tag: &str) -> Result<PathBuf> {
     let base = env
         .db_path
         .parent()
-        .ok_or_else(|| anyhow!("无法确定 db parent path"))?;
+        .ok_or_else(|| anyhow!("cannot locate db parent path"))?;
     let merkle_dir = base.join("merkle");
     fs::create_dir_all(&merkle_dir)?;
     Ok(merkle_dir.join(format!("{}@{}.merkle.bin", name, tag)))
