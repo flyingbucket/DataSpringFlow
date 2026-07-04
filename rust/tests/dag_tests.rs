@@ -1,6 +1,6 @@
 mod common; // 引入上面的 common/mod.rs
 use common::{MemoryBackend, TestSandbox};
-use dataspringflow_rs::core::DatasetBackend;
+use dataspringflow_rs::backend::DatasetBackend;
 use dataspringflow_rs::core::MetaData;
 
 #[cfg(test)]

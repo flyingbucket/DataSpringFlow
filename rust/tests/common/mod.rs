@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 
 // 引入你 src/ lib.rs 里暴露出的接口
-use dataspringflow_rs::core::{DatasetBackend, MetaData};
+use dataspringflow_rs::backend::DatasetBackend;
+use dataspringflow_rs::core::MetaData;
 
 /// 纯内存 Mock 后端
 pub struct MemoryBackend {
@@ -34,39 +35,22 @@ impl DatasetBackend for MemoryBackend {
         store.insert(metadata.id(), metadata.clone());
         Ok(())
     }
+
+    fn check_is_referenced(&self, target_id: &str) -> io::Result<Vec<String>> {
+        let _ = target_id;
+        todo!()
+    }
+
+    fn list_all_metadata(&self) -> io::Result<Vec<MetaData>> {
+        todo!()
+    }
+
+    fn delete_metadata(&self, id: &str) -> io::Result<()> {
+        let _ = id;
+        todo!()
+    }
 }
 
-/// 临时目录文件沙盒
-// pub struct TestSandbox {
-//     pub base_dir: PathBuf,
-// }
-//
-// impl TestSandbox {
-//     pub fn new(test_name: &str) -> Self {
-//         let mut base_dir = std::env::temp_dir();
-//         base_dir.push("dsf_tests");
-//         base_dir.push(test_name);
-//         let _ = fs::remove_dir_all(&base_dir);
-//         fs::create_dir_all(&base_dir).unwrap();
-//         Self { base_dir }
-//     }
-//
-//     pub fn create_dummy_dataset(&self, folder_name: &str, content: &str) -> PathBuf {
-//         let ds_path = self.base_dir.join(folder_name);
-//         fs::create_dir_all(&ds_path).unwrap();
-//         let mut file = File::create(ds_path.join("data.txt")).unwrap();
-//         file.write_all(content.as_bytes()).unwrap();
-//         ds_path
-//     }
-// }
-//
-// impl Drop for TestSandbox {
-//     fn drop(&mut self) {
-//         let _ = fs::remove_dir_all(&self.base_dir);
-//     }
-// }
-//
-/// 辅助沙盒工具：在系统的临时目录下创建真实的小文件，供 Merkle Tree 计算真实哈希
 pub struct TestSandbox {
     base_dir: PathBuf,
 }

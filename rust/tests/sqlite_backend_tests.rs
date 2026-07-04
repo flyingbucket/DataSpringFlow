@@ -1,5 +1,6 @@
+use dataspringflow_rs::backend::DatasetBackend;
 use dataspringflow_rs::backend::{SqliteBackend, SqliteConfig};
-use dataspringflow_rs::core::{DatasetBackend, MetaData};
+use dataspringflow_rs::core::MetaData;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use tempfile::tempdir;

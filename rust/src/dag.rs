@@ -1,4 +1,5 @@
-use crate::core::{DSFDataSet, DataSetVerifyRes, DatasetBackend};
+use crate::backend::DatasetBackend;
+use crate::core::{DSFDataSet, DataSetVerifyRes};
 use std::collections::{HashMap, HashSet};
 use std::io;
 

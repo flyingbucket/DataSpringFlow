@@ -1,4 +1,5 @@
 use crate::{
+    backend::DatasetBackend,
     dag::{DatasetGraph, DatasetGraphError},
     merkle::{FileMerkleTree, HashRes, MerkleTreeSnapshot},
     utils::hashres_to_hex,
@@ -6,21 +7,6 @@ use crate::{
 use std::collections::HashMap;
 use std::io::{self, Error, ErrorKind};
 use std::path::PathBuf;
-
-pub trait DatasetBackend {
-    /// 根据数据集 ID 获取对应的元数据
-    fn get_metadata(&self, id: &str) -> io::Result<MetaData>;
-
-    /// 保存或更新数据集元数据
-    fn save_metadata(&self, metadata: &MetaData) -> io::Result<()>;
-
-    /// 检查是否有任何数据集依赖了指定的 target_id
-    fn check_is_referenced(&self, target_id: &str) -> io::Result<Vec<String>>;
-
-    fn list_all_metadata(&self) -> io::Result<Vec<MetaData>>;
-
-    fn delete_metadata(&self, id: &str) -> io::Result<()>;
-}
 
 #[derive(Clone, Debug)]
 pub struct MetaData {

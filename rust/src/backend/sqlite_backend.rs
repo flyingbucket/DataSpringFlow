@@ -1,4 +1,5 @@
-use crate::core::{DatasetBackend, MetaData};
+use crate::backend::DatasetBackend;
+use crate::core::MetaData;
 use dirs::home_dir;
 use r2d2::Pool;
 use r2d2::PooledConnection;
