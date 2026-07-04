@@ -15,8 +15,7 @@ use crate::utils::{AppEnv, hashres_to_hex};
 #[derive(Parser, Debug)]
 #[command(
     name = "dsf",
-    about = "DataSpringFlow: dataset assets managment tool 
-featuring DAG linage and blake hash verification.",
+    about = "DataSpringFlow: dataset assets managment tool featuring DAG linage and blake hash verification.",
     version
 )]
 pub struct Cli {
@@ -26,29 +25,29 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// 交互式初始化安装
+    /// Interactive initialization and installation
     Init {
-        /// 全局安装（/etc/dsf + /var/lib/dsf）
+        /// Global installation (/etc/dsf + /var/lib/dsf)
         #[arg(long, default_value_t = false)]
         global: bool,
-        /// 非交互，直接按默认路径初始化
+        ///  Non-interactive mode, initialize using default paths directly
         #[arg(long, default_value_t = false)]
-        yes: bool,
+        non_interactive: bool,
     },
 
-    /// 查询数据集状态
+    /// Query dataset status
     Status {
-        /// 数据集 ID: name@tag
+        /// Dataset ID in format: name@tag
         id: String,
-        /// 校验等级
+        /// Verification Level
         #[arg(short, long, value_enum, default_value_t = VerifyLevel::SelfOnly)]
         level: VerifyLevel,
-        /// 失败时显示差异
+        /// Show differences on verification failure
         #[arg(long, default_value_t = false)]
         show_diff: bool,
     },
 
-    /// 注册新数据集
+    /// Register new dataset
     Register {
         #[arg(long)]
         name: String,
@@ -62,18 +61,18 @@ pub enum Commands {
         description_path: Option<PathBuf>,
         #[arg(long = "deps")]
         dependencies: Vec<String>,
-        /// 非交互：发现损坏依赖时强制 heal
+        /// Non-interactive mode: force heal when broken dependencies are detected
         #[arg(long, default_value_t = false)]
         force_heal: bool,
-        /// 非交互确认
+        /// Non-interactive confirmation (skip prompts)
         #[arg(long, default_value_t = false)]
         yes: bool,
     },
 
-    /// 重算并更新 hash
+    /// Recalculate and update dataset hashes
     Update { id: String },
 
-    /// 删除数据集条目
+    /// Delete a dataset entry
     Delete {
         id: String,
         #[arg(long, default_value_t = false)]
@@ -92,7 +91,10 @@ pub enum VerifyLevel {
 
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Commands::Init { global, yes } => handle_init(global, yes),
+        Commands::Init {
+            global,
+            non_interactive,
+        } => handle_init(global, non_interactive),
         Commands::Status {
             id,
             level,
@@ -144,11 +146,11 @@ fn handle_init(global_flag: bool, yes: bool) -> Result<()> {
         false
     } else {
         let items = vec![
-            "User 安装 (~/.config + ~/.local/share)",
-            "Global 安装 (/etc + /var/lib)",
+            "User installation (~/.config + ~/.local/share)",
+            "Global installation (/etc + /var/lib)",
         ];
         let idx = Select::new()
-            .with_prompt("请选择安装模式")
+            .with_prompt("Plese select installation mode")
             .items(&items)
             .default(0)
             .interact()?;
@@ -159,8 +161,10 @@ fn handle_init(global_flag: bool, yes: bool) -> Result<()> {
     if global && !is_root() {
         bail!(
             "{}\n{}",
-            "全局安装需要 root 权限".red().bold(),
-            "请使用: sudo dsf init --global".yellow()
+            "Error: Global installation requires root privileges."
+                .red()
+                .bold(),
+            "Please use: sudo dsf init --global".yellow()
         );
     }
 
@@ -179,43 +183,48 @@ fn handle_init(global_flag: bool, yes: bool) -> Result<()> {
         (default_config, default_db)
     } else {
         let config_path: String = Input::new()
-            .with_prompt("配置文件路径")
+            .with_prompt("Config file path")
             .default(default_config.display().to_string())
             .interact_text()?;
         let db_path: String = Input::new()
-            .with_prompt("SQLite 数据库路径")
+            .with_prompt("SQLite db file path")
             .default(default_db.display().to_string())
             .interact_text()?;
         (PathBuf::from(config_path), PathBuf::from(db_path))
     };
 
     println!(
-        "安装模式: {}",
+        "Installation mode: {}",
         if global {
             "global".cyan()
         } else {
             "user".cyan()
         }
     );
-    println!("配置文件: {}", config_path.display().to_string().cyan());
-    println!("数据库:   {}", db_path.display().to_string().cyan());
+    println!(
+        "Config file:     {}",
+        config_path.display().to_string().cyan()
+    );
+    println!("DataBase file:   {}", db_path.display().to_string().cyan());
 
     if !yes {
         let ok = Confirm::new()
-            .with_prompt("确认写入并初始化？")
+            .with_prompt("Confirm?")
             .default(true)
             .interact()?;
         if !ok {
-            bail!("已取消初始化");
+            bail!("Installation and initialization terminated");
         }
     }
 
     // 5) 创建目录并写配置
     if let Some(p) = config_path.parent() {
-        fs::create_dir_all(p).with_context(|| format!("创建配置目录失败: {}", p.display()))?;
+        fs::create_dir_all(p)
+            .with_context(|| format!("Failed making config dir: {}", p.display()))?;
     }
     if let Some(p) = db_path.parent() {
-        fs::create_dir_all(p).with_context(|| format!("创建数据库目录失败: {}", p.display()))?;
+        fs::create_dir_all(p)
+            .with_context(|| format!("Failed making data base dir: {}", p.display()))?;
     }
 
     let yaml = format!(
@@ -223,13 +232,13 @@ fn handle_init(global_flag: bool, yes: bool) -> Result<()> {
         db_path.display()
     );
     fs::write(&config_path, yaml)
-        .with_context(|| format!("写配置失败: {}", config_path.display()))?;
+        .with_context(|| format!("Failed writting config file: {}", config_path.display()))?;
 
     // 6) 让后端按配置初始化（如果你后端通过 DSF_CONFIG 读取，这里可 set env）
     unsafe { std::env::set_var("DSF_CONFIG", config_path.as_os_str()) };
-    let _backend = SqliteBackend::new().context("初始化数据库失败")?;
+    let _backend = SqliteBackend::new().context("Failed initializing db file")?;
 
-    println!("{}", "✔ 初始化完成".green().bold());
+    println!("{}", "Initialization finished".green().bold());
     Ok(())
 }
 
@@ -242,14 +251,14 @@ fn handle_status(id: &str, level: VerifyLevel, show_diff: bool) -> Result<()> {
             let meta = backend.get_metadata(id);
             match meta {
                 Ok(m) => {
-                    println!("{}", "存在".green());
+                    println!("{}", "Dataset exists".green());
                     println!("id: {}", m.id());
                     println!("path: {}", m.path.display());
                     println!("hash: {}", m.hash);
                     println!("deps: {:?}", m.dependencies);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    println!("{}", "不存在".red().bold());
+                    println!("{}", "Dataset doesn't exist".red().bold());
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -334,7 +343,7 @@ fn handle_register(opts: RegisterOptions) -> Result<()> {
             ds.metadata.hash = hashres_to_hex(new_merkle.get_hash()?);
             new_merkle.save_to_disk(&ds.metadata.merkle_tree_path)?;
             backend.save_metadata(&ds.metadata)?;
-            println!("  ✔ Healed {}", dep_id.green());
+            println!("Healed {}", dep_id.green());
         }
     }
 

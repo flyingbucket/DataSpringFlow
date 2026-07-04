@@ -7,6 +7,10 @@ edition = "2024"
 name = "dataspringflow_rs"
 crate-type = ["cdylib", "rlib"]
 
+[[bin]]
+name = "dsf"
+path = "src/main.rs"
+
 [dependencies]
 pyo3 = { version = "0.29.0", features = ["extension-module", "abi3-py39"] }
 walkdir = "2"
