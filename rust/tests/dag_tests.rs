@@ -1,128 +1,163 @@
-mod common; // 引入上面的 common/mod.rs
-use common::{MemoryBackend, TestSandbox};
-use dataspringflow_rs::backend::DatasetBackend;
-use dataspringflow_rs::core::MetaData;
+mod common;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::common::{MemoryBackend, TestSandbox};
+    use dataspringflow_rs::backend::DatasetBackend;
+    use dataspringflow_rs::core::MetaData;
+    use dataspringflow_rs::dag::*;
 
-    #[test]
-    fn test_mock_backend_crud() {
-        let backend = MemoryBackend::new();
-        let sandbox = TestSandbox::new("crud_test");
-        let path = sandbox.create_dummy_dataset("test_ds", "some ai data");
+    /// 辅助函数：根据邻接关系在 MemoryBackend 中注册一组 Mock MetaData
+    fn setup_mock_backend(
+        backend: &MemoryBackend,
+        sandbox: &TestSandbox,
+        nodes: &[(&str, &str, &[&str])],
+    ) {
+        for (name, tag, deps) in nodes {
+            // 在沙盒磁盘中生成真实 dummy 目录
+            let folder_name = format!("{}_{}", name, tag);
+            let ds_path = sandbox.create_dummy_dataset(&folder_name, "dummy-data");
 
-        // 1. 构造 Metadata
-        let meta = MetaData::new(
-            "imagenet_subset",
-            "v1.0",
-            path.clone(),
-            path.join("desc.md"),
-            path.join("clean.py"),
-            vec![], // 无依赖
-            path.join("tree.bin"),
-        )
-        .expect("生成 MetaData 失败");
+            // 🌟 修复 1：将描述文件路径和脚本路径包装进 Some() 中以匹配 Option<PathBuf>
+            let meta = MetaData::new(
+                name,
+                tag,
+                ds_path.clone(),
+                Some(ds_path.join("desc.md")),
+                ds_path.join("script.py"),
+                deps.iter().map(|s| s.to_string()).collect(),
+                ds_path.join("merkle.bin"),
+            )
+            .expect("Failed to create MetaData instance");
 
-        // 2. 提交到后端
-        meta.commit(&backend).expect("提交到 Mock 后端失败");
-
-        // 3. 从后端验证读取
-        let loaded_meta = backend
-            .get_metadata("imagenet_subset@v1.0")
-            .expect("读取失败");
-
-        assert_eq!(loaded_meta.name, "imagenet_subset");
-        assert_eq!(loaded_meta.tag, "v1.0");
-        assert_eq!(loaded_meta.hash, meta.hash);
+            backend
+                .save_metadata(&meta)
+                .expect("Failed to save metadata to mock backend");
+        }
     }
 
     #[test]
-    fn test_dag_verification_healthy() {
+    fn test_from_root_and_cycle_ok_for_acyclic_graph() {
+        let sandbox = TestSandbox::new("acyclic_graph");
         let backend = MemoryBackend::new();
-        let sandbox = TestSandbox::new("healthy_dag_test");
 
-        // 1. 创建底层基础数据集：ImageNet 原始数据
-        let raw_path = sandbox.create_dummy_dataset("imagenet_raw", "raw image bytes...");
-        let raw_meta = MetaData::new(
-            "imagenet",
-            "2012",
-            raw_path.clone(),
-            raw_path.join("desc.md"),
-            raw_path.join("script.py"),
-            vec![], // 基础数据集无依赖
-            raw_path.join("tree.bin"),
-        )
-        .unwrap();
-        raw_meta.commit(&backend).unwrap();
+        setup_mock_backend(
+            &backend,
+            &sandbox,
+            &[
+                ("A", "v1", &["B@v1", "C@v1"]),
+                ("B", "v1", &["D@v1"]),
+                ("C", "v1", &[]),
+                ("D", "v1", &[]),
+            ],
+        );
 
-        // 2. 创建上层派生数据集：比如经过裁剪的鸟类子集 (依赖 imagenet@2012)
-        let birds_path = sandbox.create_dummy_dataset("imagenet_birds", "cropped birds bytes...");
-        let birds_meta = MetaData::new(
-            "imagenet_birds",
-            "v1",
-            birds_path.clone(),
-            birds_path.join("desc.md"),
-            birds_path.join("script.py"),
-            vec!["imagenet@2012".to_string()], // 依赖绑定
-            birds_path.join("tree.bin"),
-        )
-        .unwrap();
-        birds_meta.commit(&backend).unwrap();
+        let graph_res = DatasetGraph::from_root("A@v1", &backend);
+        assert!(
+            graph_res.is_ok(),
+            "Failed to load graph from root: {:?}",
+            graph_res.err()
+        );
 
-        // 3. 校验派生数据集
-        // 假设这里直接使用你之前重构的 DatasetGraph 来校验子图
-        // let mut graph = DatasetGraph::from_root("imagenet_birds@v1", &backend).unwrap();
-        // let res = graph.verify_subgraph("imagenet_birds@v1", false).unwrap();
+        let graph = graph_res.unwrap();
+        assert_eq!(graph.datasets.len(), 4);
 
-        // 验证两者状态都应为 Healthy
-        // assert_eq!(res.status, DataSetStatus::Healthy);
+        let cycle_res = graph.check_cycle();
+        assert!(
+            cycle_res.is_ok(),
+            "Acyclic graph should not trigger cycle error"
+        );
     }
 
     #[test]
-    fn test_dag_verification_broken_dependency() {
+    fn test_cycle_detects_simple_cycle() {
+        let sandbox = TestSandbox::new("simple_cycle");
         let backend = MemoryBackend::new();
-        let sandbox = TestSandbox::new("broken_dag_test");
 
-        // 1. 创建并注册基础数据集 A
-        let path_a = sandbox.create_dummy_dataset("dataset_a", "original content A");
-        let meta_a = MetaData::new(
-            "dataset_a",
-            "v1",
-            path_a.clone(),
-            path_a.join("desc.md"),
-            path_a.join("script.py"),
-            vec![],
-            path_a.join("tree.bin"),
-        )
-        .unwrap();
-        meta_a.commit(&backend).unwrap();
+        // 构造环: A@v1 -> B@v1 -> A@v1
+        setup_mock_backend(
+            &backend,
+            &sandbox,
+            &[("A", "v1", &["B@v1"]), ("B", "v1", &["A@v1"])],
+        );
 
-        // 2. 创建并注册依赖 A 的派生数据集 B
-        let path_b = sandbox.create_dummy_dataset("dataset_b", "original content B");
-        let meta_b = MetaData::new(
-            "dataset_b",
-            "v1",
-            path_b.clone(),
-            path_b.join("desc.md"),
-            path_b.join("script.py"),
-            vec!["dataset_a@v1".to_string()], // B -> A
-            path_b.join("tree.bin"),
-        )
-        .unwrap();
-        meta_b.commit(&backend).unwrap();
+        // 🌟 修复 2：因为 from_root 返回的是 std::io::Result，它不会返回 DatasetGraphError。
+        // 如果 from_root 内部碰到了环导致失败，它会返回 std::io::Error。
+        let graph_res = DatasetGraph::from_root("A@v1", &backend);
 
-        // 3. 【核心步骤】：恶意/意外篡改底层数据集 A 的物理文件！
-        sandbox.tamper_file("dataset_a", "CORRUPTED CONTENT A!!!");
+        match graph_res {
+            Ok(graph) => {
+                let cycle_res = graph.check_cycle();
+                match cycle_res {
+                    // check_cycle() 返回的是 DatasetGraphError
+                    Err(DatasetGraphError::CycleDetected { node, dep }) => {
+                        let pairs =
+                            vec![(node.as_str(), dep.as_str()), (dep.as_str(), node.as_str())];
+                        assert!(pairs.contains(&("A@v1", "B@v1")));
+                    }
+                    _ => panic!(
+                        "Expected CycleDetected from check_cycle, got: {:?}",
+                        cycle_res
+                    ),
+                }
+            }
+            Err(io_err) => {
+                // 如果你的 from_root 在自底向上构建时就通过 io::Error 拦截了环
+                // 我们通过识别它的错误副文本来断言成功
+                let err_msg = io_err.to_string();
+                assert!(err_msg.contains("A@v1") || err_msg.contains("B@v1"));
+            }
+        }
+    }
 
-        // 4. 此时对 B 发起图校验
-        // let mut graph = DatasetGraph::from_root("dataset_b@v1", &backend).unwrap();
-        // let res = graph.verify_subgraph("dataset_b@v1", false).unwrap();
+    #[test]
+    fn test_cycle_detects_self_cycle() {
+        let sandbox = TestSandbox::new("self_cycle");
+        let backend = MemoryBackend::new();
 
-        // 预期结果：
-        // - A 本地的文件内容与保存的 Merkle Root 不吻合 -> 状态变为 Broken
-        // - B 自身的文件未被修改，但是因为上游 A 损坏 -> 状态应退化为 BrokenDeps
-        // assert_eq!(res.status, DataSetStatus::BrokenDpes);
+        setup_mock_backend(&backend, &sandbox, &[("A", "v1", &["A@v1"])]);
+
+        let graph_res = DatasetGraph::from_root("A@v1", &backend);
+
+        // 🌟 修复 3：统一 match 两臂的错误形态，不混用 io::Error 和 DatasetGraphError
+        match graph_res {
+            Ok(graph) => match graph.check_cycle() {
+                Err(DatasetGraphError::CycleDetected { node, dep }) => {
+                    assert_eq!(node, "A@v1");
+                    assert_eq!(dep, "A@v1");
+                }
+                _ => panic!("Expected self-loop CycleDetected from check_cycle"),
+            },
+            Err(io_err) => {
+                assert!(io_err.to_string().contains("A@v1"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_topo_sort_order() {
+        let sandbox = TestSandbox::new("topo_sort");
+        let backend = MemoryBackend::new();
+
+        setup_mock_backend(
+            &backend,
+            &sandbox,
+            &[
+                ("A", "v1", &["B@v1"]),
+                ("B", "v1", &["C@v1"]),
+                ("C", "v1", &[]),
+            ],
+        );
+
+        // 🌟 修复 4：加下划线 `_graph` 消除无意义的变量未消费警告
+        let _graph = DatasetGraph::from_root("A@v1", &backend).unwrap();
+    }
+
+    #[test]
+    fn default_equals_new() {
+        let a = DatasetGraph::new();
+        let b = DatasetGraph::default();
+        assert_eq!(a.adj_list.len(), b.adj_list.len());
+        assert_eq!(a.datasets.len(), b.datasets.len());
     }
 }

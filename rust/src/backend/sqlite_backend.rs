@@ -62,7 +62,7 @@ pub struct SqliteBackend {
 }
 
 impl SqliteBackend {
-    pub(crate) fn new(cfg: SqliteConfig) -> io::Result<Self> {
+    pub fn new(cfg: SqliteConfig) -> io::Result<Self> {
         if let Some(parent) = cfg.db_path.parent()
             && !parent.as_os_str().is_empty()
         {

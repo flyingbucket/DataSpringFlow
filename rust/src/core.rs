@@ -24,11 +24,11 @@ pub struct MetaData {
 }
 
 impl MetaData {
-    pub(crate) fn id(&self) -> String {
+    pub fn id(&self) -> String {
         format!("{}@{}", self.name, self.tag)
     }
 
-    pub(crate) fn new(
+    pub fn new(
         name: &str,
         tag: &str,
         path: PathBuf,

@@ -29,7 +29,7 @@ fn test_backend_init_and_table_creation() {
     cfg.db_path = db_path.clone();
 
     // 测试：初始化是否成功（这里会隐式调用 init() 创建表结构）
-    let backend = SqliteBackend::from_config(cfg).expect("初始化 SQLite 后端失败");
+    let backend = SqliteBackend::new(cfg).expect("初始化 SQLite 后端失败");
 
     // 验证：数据库文件确实被物理创建在了临时目录中
     assert!(db_path.exists(), "数据库文件未生成");
@@ -43,7 +43,7 @@ fn test_save_and_get_metadata() {
     let dir = tempdir().unwrap();
     let mut cfg = SqliteConfig::default();
     cfg.db_path = dir.path().join("test_crud.db");
-    let backend = SqliteBackend::from_config(cfg).unwrap();
+    let backend = SqliteBackend::new(cfg).unwrap();
 
     let meta = create_dummy_metadata("imagenet", "v1.0");
 
@@ -70,7 +70,7 @@ fn test_upsert_overwrite_logic() {
     let dir = tempdir().unwrap();
     let mut cfg = SqliteConfig::default();
     cfg.db_path = dir.path().join("test_upsert.db");
-    let backend = SqliteBackend::from_config(cfg).unwrap();
+    let backend = SqliteBackend::new(cfg).unwrap();
 
     let mut meta = create_dummy_metadata("cifar10", "v1.0");
 
@@ -101,7 +101,7 @@ fn test_get_not_found_error_mapping() {
     let dir = tempdir().unwrap();
     let mut cfg = SqliteConfig::default();
     cfg.db_path = dir.path().join("test_not_found.db");
-    let backend = SqliteBackend::from_config(cfg).unwrap();
+    let backend = SqliteBackend::new(cfg).unwrap();
 
     // 尝试读取一个根本不存在的数据集
     let res = backend.get_metadata("ghost_dataset@v9.9");
@@ -123,7 +123,7 @@ fn test_delete_metadata_success() {
     let dir = tempdir().unwrap();
     let mut cfg = SqliteConfig::default();
     cfg.db_path = dir.path().join("test_delete_success.db");
-    let backend = SqliteBackend::from_config(cfg).unwrap();
+    let backend = SqliteBackend::new(cfg).unwrap();
 
     let meta = create_dummy_metadata("mnist", "v1.0");
     let id = meta.id();
@@ -146,7 +146,7 @@ fn test_delete_metadata_not_found_strict_blocking() {
     let dir = tempdir().unwrap();
     let mut cfg = SqliteConfig::default();
     cfg.db_path = dir.path().join("test_delete_err.db");
-    let backend = SqliteBackend::from_config(cfg).unwrap();
+    let backend = SqliteBackend::new(cfg).unwrap();
 
     // 尝试删除一个根本没有被注册过的幽灵数据集
     let fake_id = "never_existed_dataset@v1.0";
@@ -169,7 +169,7 @@ fn test_list_all_metadata_or_empty() {
     let dir = tempdir().unwrap();
     let mut cfg = SqliteConfig::default();
     cfg.db_path = dir.path().join("test_list.db");
-    let backend = SqliteBackend::from_config(cfg).unwrap();
+    let backend = SqliteBackend::new(cfg).unwrap();
 
     // 1. 数据库刚初始化时，全量列表应该是空的
     let empty_list = backend.list_all_metadata().expect("读取空列表报错");
