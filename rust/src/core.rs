@@ -1,13 +1,16 @@
+use directories::ProjectDirs;
+use std::collections::HashMap;
+use std::fs;
+use std::io::Write;
+use std::io::{self, Error, ErrorKind};
+use std::path::PathBuf;
+
 use crate::{
     backend::BackendRef,
     dag::{DatasetGraph, DatasetGraphError},
     merkle::{FileMerkleTree, HashRes, MerkleTreeSnapshot},
     utils::hashres_to_hex,
 };
-use std::collections::HashMap;
-use std::io::{self, Error, ErrorKind};
-use std::path::PathBuf;
-
 #[derive(Clone, Debug)]
 pub struct MetaData {
     pub name: String,
@@ -29,7 +32,7 @@ impl MetaData {
         name: &str,
         tag: &str,
         path: PathBuf,
-        description_path: PathBuf,
+        description_path: Option<PathBuf>,
         script_path: PathBuf,
         dependencies: Vec<String>,
         merkle_tree_path: PathBuf,
@@ -49,12 +52,32 @@ impl MetaData {
         let mut merkle_tree = FileMerkleTree::new(path.clone())?;
         let hash = hashres_to_hex(merkle_tree.get_hash()?);
         merkle_tree.save_to_disk(&merkle_tree_path)?;
+
+        let final_description_path = match description_path {
+            Some(p) => p,
+            None => {
+                let desc_dir = ProjectDirs::from("io", "flyingbucket", "dataspringflow")
+                    .map(|proj| proj.data_dir().join("descriptions"))
+                    .unwrap_or_else(|| std::path::PathBuf::from("./data/descriptions"));
+
+                fs::create_dir_all(&desc_dir)?;
+                let p = desc_dir.join(format!("{}_{}.md", name, tag));
+
+                if !p.exists() {
+                    let mut f = fs::File::create(&p)?;
+                    writeln!(f, "# {}@{}", name, tag)?;
+                    writeln!(f)?;
+                    writeln!(f, "<!-- TODO: add dataset description -->")?;
+                }
+                p
+            }
+        };
         let meta = Self {
             name: name.to_string(),
             tag: tag.to_string(),
             hash,
             path,
-            description_path,
+            description_path: final_description_path,
             script_path,
             dependencies,
             merkle_tree_path,
