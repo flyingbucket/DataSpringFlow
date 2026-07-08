@@ -9,10 +9,19 @@ crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "dsf"
-path = "src/main.rs"
+path = "src/bin/dsf.rs"
+required-features = ["cli"]
+
+[features]
+default = []
+py_bindings = ["dep:pyo3"]
+cli = ["dep:clap", "dep:dialoguer"]
 
 [dependencies]
-pyo3 = { version = "0.29.0", features = ["extension-module", "abi3-py39"] }
+pyo3 = { version = "0.29.0", optional = true, features = [
+  "extension-module",
+  "abi3-py39",
+] }
 walkdir = "2"
 rayon = "1.12"
 blake3 = { version = "1.8", features = ["traits-preview", "rayon", "mmap"] }
@@ -32,12 +41,12 @@ serde_json = "1"
 dirs = "6"
 
 # cli
-clap = { version = "4", features = ["derive"] }
-dialoguer = "0.12"                                  # 交互式终端提示（选择、确认框）
-colored = "3"                                       # 终端文字着色
-anyhow = "1.0.103"
-libc = "0.2.186"
+colored = "3"
 strum = { version = "0.28", features = ["derive"] }
+libc = "0.2"
+anyhow = "1"                                                     # CLI optional deps
+clap = { version = "4", features = ["derive"], optional = true }
+dialoguer = { version = "0.12", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
