@@ -1,25 +1,19 @@
 use crate::backend::DatasetBackend;
+use crate::config::{AppConfig, BackendConfig};
 use crate::core::MetaData;
-use dirs::home_dir;
 use r2d2::Pool;
 use r2d2::PooledConnection;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::Deserialize;
-use std::env;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::io::Error;
 use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct AppConfig {
-    pub sqlite: SqliteConfig,
-}
-
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqliteConfig {
     pub db_path: PathBuf,
     #[serde(default = "default_pool_size")]
@@ -70,13 +64,20 @@ pub struct SqliteBackend {
 
 impl SqliteBackend {
     /// 自动从配置文件加载：
-    /// 1) $DSF_CONFIG
-    /// 2) $HOME/.config/dsf/config.yaml
-    /// 3) /etc/dsf/config.yaml
-    /// 4) 都没有则默认配置
+    /// 1) $HOME/.config/dsf/config.yaml
+    /// 2) /etc/dsf/config.yaml
+    /// 3) 都没有则默认配置
     pub fn new() -> io::Result<Self> {
-        let cfg = Self::load_config()?;
-        Self::from_config(cfg)
+        let backend_cfg = AppConfig::load()?.backend;
+
+        #[allow(unreachable_patterns)]
+        match backend_cfg {
+            BackendConfig::Sqlite(sqlite_cfg) => Self::from_config(sqlite_cfg),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Failed to initialize SqliteBackend: The active backend in config.yaml is NOT sqlite.",
+            )),
+        }
     }
 
     /// 允许在测试/特殊场景直接传配置
@@ -96,45 +97,6 @@ impl SqliteBackend {
         let backend = Self { cfg, pool };
         backend.init()?;
         Ok(backend)
-    }
-
-    fn load_config() -> io::Result<SqliteConfig> {
-        // 1) DSF_CONFIG
-        if let Ok(path) = env::var("DSF_CONFIG") {
-            let cfg = Self::load_yaml(path.as_ref())?;
-            return Ok(cfg.sqlite);
-        }
-
-        // 2) ~/.config/dsf/config.yaml
-        if let Some(home) = home_dir() {
-            let p = home.join(".config/dsf/config.yaml");
-            if p.exists() {
-                let cfg = Self::load_yaml(&p)?;
-                return Ok(cfg.sqlite);
-            }
-        }
-
-        // 3) /etc/dsf/config.yaml
-        let etc_path = PathBuf::from("/etc/dsf/config.yaml");
-        if etc_path.exists() {
-            let cfg = Self::load_yaml(&etc_path)?;
-            return Ok(cfg.sqlite);
-        }
-
-        // 4) default
-        Ok(SqliteConfig::default())
-    }
-
-    fn load_yaml(path: &Path) -> io::Result<AppConfig> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| Error::other(format!("read config failed ({}): {e}", path.display())))?;
-
-        serde_yaml::from_str::<AppConfig>(&content).map_err(|e| {
-            Error::new(
-                ErrorKind::InvalidData,
-                format!("parse config yaml failed ({}): {e}", path.display()),
-            )
-        })
     }
 
     fn conn(&self) -> io::Result<PooledConnection<SqliteConnectionManager>> {
@@ -329,10 +291,89 @@ impl DatasetBackend for SqliteBackend {
     }
 
     fn list_all_metadata(&self) -> io::Result<Vec<MetaData>> {
-        todo!("list_all_metadata not implemented yet")
+        let conn = self.conn()?;
+
+        // 准备查询语句，捞出表内的全部元数据字段
+        let mut stmt = conn
+            .prepare(
+                r#"
+                SELECT name, tag, hash, path, description_path, script_path, dependencies_json, merkle_tree_path
+                FROM datasets
+                "#,
+            )
+            .map_err(|e| io::Error::other(format!("prepare list_all_metadata statement failed: {e}")))?;
+
+        // 利用 query_map 进行流式行列映射
+        let metadata_iter = stmt
+            .query_map([], |row| {
+                let name: String = row.get(0)?;
+                let tag: String = row.get(1)?;
+                let hash: String = row.get(2)?;
+                let path: String = row.get(3)?;
+                let description_path: String = row.get(4)?;
+                let script_path: String = row.get(5)?;
+                let dependencies_json: String = row.get(6)?;
+                let merkle_tree_path: String = row.get(7)?;
+
+                // 反序列化 JSON 依赖树数组
+                let dependencies: Vec<String> =
+                    serde_json::from_str(&dependencies_json).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            6,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })?;
+
+                Ok(MetaData {
+                    name,
+                    tag,
+                    hash,
+                    path: PathBuf::from(path),
+                    description_path: PathBuf::from(description_path),
+                    script_path: PathBuf::from(script_path),
+                    dependencies,
+                    merkle_tree_path: PathBuf::from(merkle_tree_path),
+                })
+            })
+            .map_err(|e| io::Error::other(format!("query_map all metadata failed: {e}")))?;
+
+        // 收集迭代器中的结果，并把可能存在的错误（如中间某行反序列化失败）向上抛出
+        let mut all_metadata = Vec::new();
+        for meta_res in metadata_iter {
+            all_metadata.push(
+                meta_res
+                    .map_err(|e| io::Error::other(format!("parse row failed in list_all: {e}")))?,
+            );
+        }
+
+        Ok(all_metadata)
     }
 
-    fn delete_metadata(&self, _id: &str) -> io::Result<()> {
-        todo!("delete_metadata not implemented yet")
+    fn delete_metadata(&self, id: &str) -> io::Result<()> {
+        let mut conn = self.conn()?;
+
+        let tx = conn
+            .transaction()
+            .map_err(|e| io::Error::other(format!("begin delete transaction failed: {e}")))?;
+
+        let rows_affected = tx
+            .execute("DELETE FROM datasets WHERE id = ?1", params![id])
+            .map_err(|e| io::Error::other(format!("execute delete statement failed: {e}")))?;
+
+        // 如果影响行数为 0，说明这个 id 本就不存在。
+        // 在工业级设计中，可以选择抛出 NotFound 错误，也可以静默当作 Ok(()) 成功。
+        // 这里推荐严格抛出 NotFound，给前端 CLI 或者业务层提供精准的反馈控制。
+        if rows_affected == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("cannot delete dataset: id '{}' not found in database", id),
+            ));
+        }
+
+        tx.commit()
+            .map_err(|e| io::Error::other(format!("commit delete transaction failed: {e}")))?;
+
+        Ok(())
     }
 }

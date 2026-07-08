@@ -117,3 +117,80 @@ fn test_get_not_found_error_mapping() {
         "错误类型应该被映射为 NotFound"
     );
 }
+
+#[test]
+fn test_delete_metadata_success() {
+    let dir = tempdir().unwrap();
+    let mut cfg = SqliteConfig::default();
+    cfg.db_path = dir.path().join("test_delete_success.db");
+    let backend = SqliteBackend::from_config(cfg).unwrap();
+
+    let meta = create_dummy_metadata("mnist", "v1.0");
+    let id = meta.id();
+
+    // 1. 先存进去，并验证它确实存在
+    backend.save_metadata(&meta).unwrap();
+    assert!(backend.get_metadata(&id).is_ok());
+
+    // 2. 执行删除，应该顺畅通过并 COMMIT 事务
+    backend.delete_metadata(&id).expect("物理删除元数据失败");
+
+    // 3. 再次读取，数据库里应该没有它了，且返回 NotFound 错误
+    let res = backend.get_metadata(&id);
+    assert!(res.is_err());
+    assert_eq!(res.unwrap_err().kind(), ErrorKind::NotFound);
+}
+
+#[test]
+fn test_delete_metadata_not_found_strict_blocking() {
+    let dir = tempdir().unwrap();
+    let mut cfg = SqliteConfig::default();
+    cfg.db_path = dir.path().join("test_delete_err.db");
+    let backend = SqliteBackend::from_config(cfg).unwrap();
+
+    // 尝试删除一个根本没有被注册过的幽灵数据集
+    let fake_id = "never_existed_dataset@v1.0";
+    let res = backend.delete_metadata(fake_id);
+
+    // 核心校验：根据工业级规范，rows_affected 为 0 时必须报错，绝不静默当作 Ok(())
+    assert!(res.is_err(), "删除不存在的 ID 时，不应该静默 Ok(()) 成功");
+
+    // 验证错误码是否被我们写的业务分支完美捕获并转化为系统级 NotFound
+    let err = res.unwrap_err();
+    assert_eq!(
+        err.kind(),
+        ErrorKind::NotFound,
+        "影响行数为 0 时，必须对外输出精准的 NotFound 报错信息"
+    );
+}
+
+#[test]
+fn test_list_all_metadata_or_empty() {
+    let dir = tempdir().unwrap();
+    let mut cfg = SqliteConfig::default();
+    cfg.db_path = dir.path().join("test_list.db");
+    let backend = SqliteBackend::from_config(cfg).unwrap();
+
+    // 1. 数据库刚初始化时，全量列表应该是空的
+    let empty_list = backend.list_all_metadata().expect("读取空列表报错");
+    assert!(empty_list.is_empty(), "全新数据库的列表应当为空");
+
+    // 2. 批量塞入两条数据集
+    let meta1 = create_dummy_metadata("coco", "v2017");
+    let meta2 = create_dummy_metadata("voc", "v2012");
+    backend.save_metadata(&meta1).unwrap();
+    backend.save_metadata(&meta2).unwrap();
+
+    // 3. 重新获取列表，验证长度和数据完备性
+    let all_datasets = backend.list_all_metadata().expect("加载全量列表失败");
+    assert_eq!(all_datasets.len(), 2, "数据库中应有且仅有 2 条数据集记录");
+
+    // 验证内容是否正确包含
+    let has_coco = all_datasets
+        .iter()
+        .any(|m| m.name == "coco" && m.tag == "v2017");
+    let has_voc = all_datasets
+        .iter()
+        .any(|m| m.name == "voc" && m.tag == "v2012");
+    assert!(has_coco && has_voc, "全量列表中的数据集信息与预期不符");
+}

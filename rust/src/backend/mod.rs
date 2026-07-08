@@ -19,6 +19,7 @@ pub trait DatasetBackend {
 
     fn delete_metadata(&self, id: &str) -> io::Result<()>;
 }
+
 #[derive(Error, Debug)]
 pub enum BackendError {
     #[error("数据集未找到: {id}")]
@@ -37,5 +38,4 @@ pub enum BackendError {
     Io(#[from] std::io::Error),
 }
 
-// 这样你就拥有了专属的 Result 别名
 pub type BackendResult<T> = Result<T, BackendError>;

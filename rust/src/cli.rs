@@ -1,16 +1,20 @@
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use colored::*;
 use dialoguer::{Confirm, Input, Select};
 use std::fs;
 use std::path::{Path, PathBuf};
+use strum::IntoEnumIterator;
+
+use directories::ProjectDirs;
 
 use crate::backend::DatasetBackend;
-use crate::backend::SqliteBackend;
+use crate::backend::{SqliteBackend, SqliteConfig};
+use crate::config::{AppConfig, BackendConfig, InstallMode};
 use crate::core::{DSFDataSet, DataSetStatus, MetaData};
 use crate::dag::DatasetGraph;
 use crate::merkle::FileMerkleTree;
-use crate::utils::{AppEnv, hashres_to_hex};
+use crate::utils::{hashres_to_hex, is_root};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -27,7 +31,7 @@ pub struct Cli {
 pub enum Commands {
     /// Interactive initialization and installation
     Init {
-        /// Global installation (/etc/dsf + /var/lib/dsf)
+        /// Global installation (/etc/dataspringflow + /var/lib/dataspringflow)
         #[arg(long, default_value_t = false)]
         global: bool,
         ///  Non-interactive mode, initialize using default paths directly
@@ -35,8 +39,11 @@ pub enum Commands {
         non_interactive: bool,
     },
 
+    /// Show current application environment and backend database configurations
+    ShowConfig,
+
     /// Query dataset status
-    Status {
+    Query {
         /// Dataset ID in format: name@tag
         id: String,
         /// Verification Level
@@ -95,11 +102,12 @@ pub fn run(cli: Cli) -> Result<()> {
             global,
             non_interactive,
         } => handle_init(global, non_interactive),
-        Commands::Status {
+        Commands::ShowConfig => handle_show_config(),
+        Commands::Query {
             id,
             level,
             show_diff,
-        } => handle_status(&id, level, show_diff),
+        } => handle_query(&id, level, show_diff),
         Commands::Register {
             name,
             tag,
@@ -138,24 +146,26 @@ pub struct RegisterOptions {
     pub yes: bool,
 }
 
-fn handle_init(global_flag: bool, yes: bool) -> Result<()> {
-    // 1) 交互决定安装级别（如果没显式 --global）
-    let global = if global_flag {
-        true
-    } else if yes {
-        false
+fn handle_init(global_flag: bool, non_inter: bool) -> Result<()> {
+    // 1) 交互决定安装级别
+    let mode = if global_flag {
+        InstallMode::Global
+    } else if non_inter {
+        InstallMode::User
     } else {
         let items = vec![
-            "User installation (~/.config + ~/.local/share)",
-            "Global installation (/etc + /var/lib)",
+            "User installation (~/.config/dataspringflow + ~/.local/share/dataspringflow)",
+            "Global installation (/etc/dataspringflow + /var/lib/dataspringflow)",
         ];
-        let idx = Select::new()
-            .with_prompt("Plese select installation mode")
-            .items(&items)
-            .default(0)
-            .interact()?;
-        idx == 1
+        let idx = Select::new().items(&items).interact()?;
+        if idx == 0 {
+            InstallMode::User
+        } else {
+            InstallMode::Global
+        }
     };
+
+    let global = { mode == InstallMode::Global };
 
     // 2) 权限检查
     if global && !is_root() {
@@ -168,31 +178,68 @@ fn handle_init(global_flag: bool, yes: bool) -> Result<()> {
         );
     }
 
-    // 3) 计算默认路径（你可按自己的 AppEnv 细节调整）
-    let env = if global {
-        AppEnv::global_default()
-    } else {
-        AppEnv::resolve()
-    };
+    let default_config: PathBuf;
+    let default_data: PathBuf;
 
-    let default_config = env.config_path.clone();
-    let default_db = env.db_path.clone();
+    if global {
+        default_config = PathBuf::from("/etc/dataspringflow/config.yaml");
+        default_data = PathBuf::from("/var/lib/dataspringflow/");
+    } else {
+        // XDG home dir
+        if let Some(proj_dirs) = ProjectDirs::from("io", "flyingbucket", "dataspringflow") {
+            default_config = proj_dirs.config_dir().join("config.yaml");
+            default_data = proj_dirs.data_dir().to_path_buf();
+        } else {
+            // 没有家目录的环境特殊情况
+            default_config = PathBuf::from("./config/config.yaml");
+            default_data = PathBuf::from("./data");
+            println!(
+                "{}",
+                "Warning: Failed to find OS standart project dir, using current working dir as a backup.\n 
+                    Check your environment varible $HOME. If using a docker, set env $DSF_CONFIG_PATH and edit that file manully."
+                    .yellow()
+                    .bold()
+            );
+        }
+    }
 
     // 4) 可交互修改路径
-    let (config_path, db_path) = if yes {
-        (default_config, default_db)
+    let (config_path, data_path) = if non_inter {
+        (default_config, default_data)
     } else {
-        let config_path: String = Input::new()
+        let config_path_str: String = Input::new()
             .with_prompt("Config file path")
             .default(default_config.display().to_string())
             .interact_text()?;
-        let db_path: String = Input::new()
-            .with_prompt("SQLite db file path")
-            .default(default_db.display().to_string())
+        let data_path_str: String = Input::new()
+            .with_prompt("Path to metadata and merkle hash tree storage ")
+            .default(default_data.display().to_string())
             .interact_text()?;
-        (PathBuf::from(config_path), PathBuf::from(db_path))
+        (PathBuf::from(config_path_str), PathBuf::from(data_path_str))
     };
 
+    let backend_choice = if non_inter {
+        BackendConfig::Sqlite(SqliteConfig::default())
+    } else {
+        let variants: Vec<BackendConfig> = BackendConfig::iter().collect();
+        let items: Vec<String> = variants.iter().map(|v| v.to_string()).collect();
+
+        let idx = Select::new()
+            .with_prompt("Select storage backend")
+            .items(&items)
+            .default(0)
+            .interact()?;
+
+        // 根据索引直接从变体列表中取回
+        #[allow(unreachable_patterns)]
+        match variants.get(idx) {
+            Some(BackendConfig::Sqlite(_)) => BackendConfig::Sqlite(SqliteConfig::default()),
+            Some(_) => bail!("Not implemented yet"),
+            None => bail!("Invalid selection"),
+        }
+    };
+
+    // 打印预览信息
     println!(
         "Installation mode: {}",
         if global {
@@ -202,12 +249,15 @@ fn handle_init(global_flag: bool, yes: bool) -> Result<()> {
         }
     );
     println!(
-        "Config file:     {}",
+        "Config file:       {}",
         config_path.display().to_string().cyan()
     );
-    println!("DataBase file:   {}", db_path.display().to_string().cyan());
+    println!(
+        "Data dir for metadata storage and merkle tree files:     {}",
+        data_path.display().to_string().cyan()
+    );
 
-    if !yes {
+    if !non_inter {
         let ok = Confirm::new()
             .with_prompt("Confirm?")
             .default(true)
@@ -217,32 +267,143 @@ fn handle_init(global_flag: bool, yes: bool) -> Result<()> {
         }
     }
 
-    // 5) 创建目录并写配置
     if let Some(p) = config_path.parent() {
         fs::create_dir_all(p)
             .with_context(|| format!("Failed making config dir: {}", p.display()))?;
     }
-    if let Some(p) = db_path.parent() {
-        fs::create_dir_all(p)
-            .with_context(|| format!("Failed making data base dir: {}", p.display()))?;
-    }
+    fs::create_dir_all(&data_path)
+        .with_context(|| format!("Failed making data base dir: {}", data_path.display()))?;
 
-    let yaml = format!(
-        "sqlite:\n  db_path: \"{}\"\n  pool_size: 8\n  busy_timeout_ms: 5000\n  wal: true\n  synchronous: \"NORMAL\"\n  foreign_keys: true\n",
-        db_path.display()
-    );
-    fs::write(&config_path, yaml)
-        .with_context(|| format!("Failed writting config file: {}", config_path.display()))?;
+    // 装配配置并写入 YAML
+    let final_config = match backend_choice {
+        BackendConfig::Sqlite(mut cfg) => {
+            // 在这里根据之前探测到的 data_path 动态设置 sqlite 路径
+            cfg.db_path = data_path.join("dsf.db");
+            AppConfig {
+                mode,
+                config_path: Some(config_path.clone()),
+                backend: BackendConfig::Sqlite(cfg),
+            }
+        }
+    };
 
-    // 6) 让后端按配置初始化（如果你后端通过 DSF_CONFIG 读取，这里可 set env）
-    unsafe { std::env::set_var("DSF_CONFIG", config_path.as_os_str()) };
-    let _backend = SqliteBackend::new().context("Failed initializing db file")?;
+    let config_yaml =
+        serde_yaml::to_string(&final_config).context("Failed to serialize AppConfig to YAML")?;
+
+    fs::write(&config_path, config_yaml)
+        .with_context(|| format!("Failed writing config file: {}", config_path.display()))?;
+
+    #[allow(unreachable_patterns)]
+    let _backend = match final_config.backend {
+        BackendConfig::Sqlite(sqlite_cfg) => {
+            SqliteBackend::from_config(sqlite_cfg).context("Failed initializing db file")?
+        }
+        _ => bail!("Unsupported backend type for initialization"),
+    };
 
     println!("{}", "Initialization finished".green().bold());
     Ok(())
 }
 
-fn handle_status(id: &str, level: VerifyLevel, show_diff: bool) -> Result<()> {
+pub fn handle_show_config() -> Result<()> {
+    println!(
+        "{}",
+        "=== DataSpringFlow Current Configuration ==="
+            .green()
+            .bold()
+    );
+
+    let app_cfg = match AppConfig::load() {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            println!("{}", "Failed to load configuration:".red().bold());
+            println!("{}", e.to_string().yellow());
+            return Ok(());
+        }
+    };
+    let mode_str = match app_cfg.mode {
+        InstallMode::User => "User",
+        InstallMode::Global => "Global",
+        InstallMode::Custom => "Custom",
+    };
+    println!("{:<25} {}", "Environment Mode:".bold(), mode_str);
+
+    let path_str = app_cfg
+        .config_path
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "Not set / In-memory".to_string());
+    println!("{:<25} {}", "Config File Path:".bold(), path_str,);
+
+    #[allow(unreachable_patterns)]
+    match app_cfg.backend {
+        BackendConfig::Sqlite(sqlite_cfg) => {
+            println!(
+                "{:<25} {}",
+                "Backend Database Path:".bold(),
+                sqlite_cfg.db_path.display().to_string().cyan()
+            );
+
+            println!(
+                "\n{}",
+                "--- Storage Backend (SQLite) Detailed Parameters ---"
+                    .normal()
+                    .dimmed()
+            );
+
+            if sqlite_cfg.db_path.exists() {
+                println!(
+                    "{:<25} {} (Concurrent Connections)",
+                    "Connection Pool Size:", sqlite_cfg.pool_size
+                );
+                println!("{:<25} {} ms", "Busy Timeout:", sqlite_cfg.busy_timeout_ms);
+                println!(
+                    "{:<25} {}",
+                    "Write-Ahead Log (WAL):",
+                    if sqlite_cfg.wal {
+                        "Enabled (True)".green()
+                    } else {
+                        "Disabled (False)".red()
+                    }
+                );
+                println!(
+                    "{:<25} {} (Balances performance & safety)",
+                    "Synchronous Mode:", sqlite_cfg.synchronous
+                );
+                println!(
+                    "{:<25} {}",
+                    "Foreign Key Constraints:",
+                    if sqlite_cfg.foreign_keys {
+                        "Enforced (True)".green()
+                    } else {
+                        "Ignored (False)".red()
+                    }
+                );
+            } else {
+                println!(
+                    "{}",
+                    "Note: Database file has not been physically created yet. The paths above are active targets.\nPlease run `dsf init` first to initialize the environment."
+                        .yellow()
+                        .dimmed()
+                );
+            }
+        }
+        // BackendConfig::Yaml(yaml_cfg) => { ... }
+        // BackendConfig::Remote(remote_cfg) => { ... }
+        _ => {
+            println!("{}", "Error: Unknown backend type.".red().bold(),);
+        }
+    }
+
+    println!(
+        "{}",
+        "===================================================="
+            .green()
+            .bold()
+    );
+    Ok(())
+}
+fn handle_query(id: &str, level: VerifyLevel, show_diff: bool) -> Result<()> {
     validate_dataset_id(id)?;
 
     let backend = SqliteBackend::new()?;
@@ -266,12 +427,12 @@ fn handle_status(id: &str, level: VerifyLevel, show_diff: bool) -> Result<()> {
         VerifyLevel::SelfOnly => {
             let mut ds = DSFDataSet::load_from_id(id, &backend)?;
             let res = ds.verify_single(show_diff, &[])?;
-            print_status(id, res.status, &res.dep_status);
+            print_query(id, res.status, &res.dep_status);
         }
         VerifyLevel::Deep => {
             let mut ds = DSFDataSet::load_from_id(id, &backend)?;
             let res = ds.verify(&backend, show_diff)?;
-            print_status(id, res.status, &res.dep_status);
+            print_query(id, res.status, &res.dep_status);
         }
     }
     Ok(())
@@ -449,20 +610,20 @@ fn handle_delete(id: &str, force: bool, yes: bool) -> Result<()> {
     Ok(())
 }
 
-fn print_status(id: &str, status: DataSetStatus, dep_statuses: &[DataSetStatus]) {
-    let s = fmt_status(status);
+fn print_query(id: &str, status: DataSetStatus, dep_statuses: &[DataSetStatus]) {
+    let s = fmt_query(status);
     println!("dataset: {}", id.cyan());
     println!("status:  {}", s);
 
     if dep_statuses.is_empty() {
         println!("deps:    []");
     } else {
-        let rendered: Vec<String> = dep_statuses.iter().map(|s| fmt_status(*s)).collect();
+        let rendered: Vec<String> = dep_statuses.iter().map(|s| fmt_query(*s)).collect();
         println!("deps:    [{}]", rendered.join(", "));
     }
 }
 
-fn fmt_status(s: DataSetStatus) -> String {
+fn fmt_query(s: DataSetStatus) -> String {
     match s {
         DataSetStatus::Healthy => "Healthy".green().to_string(),
         DataSetStatus::Broken => "Broken".red().to_string(),
@@ -492,7 +653,7 @@ fn validate_name_tag(name: &str, tag: &str) -> Result<()> {
 fn ensure_exists(p: &Path, arg_name: &str) -> Result<()> {
     if !p.exists() {
         bail!(
-            "{} Path doesn't exsit on storage: {}",
+            "{} Path doesn't exist on storage: {}",
             arg_name,
             p.display()
         );
@@ -501,22 +662,287 @@ fn ensure_exists(p: &Path, arg_name: &str) -> Result<()> {
 }
 
 fn build_default_merkle_path(name: &str, tag: &str) -> Result<PathBuf> {
-    // 可按你的 AppEnv 改成更标准的位置
-    let env = AppEnv::resolve();
-    let base = env
-        .db_path
-        .parent()
-        .ok_or_else(|| anyhow!("cannot locate db parent path"))?;
-    let merkle_dir = base.join("merkle");
+    let merkle_dir = ProjectDirs::from("io", "flyingbucket", "dataspringflow")
+        .map(|proj| proj.data_dir().join("merkle"))
+        .unwrap_or_else(||{
+            println!("{}","Warning: Failed to find OS standard project dir. Using current working dir as a backup.\n 
+                    Check your environment varible $HOME. If using a docker, set env $DSF_CONFIG_PATH and edit that file manully.".yellow().bold());
+            PathBuf::from("./data/merkle")
+        });
     fs::create_dir_all(&merkle_dir)?;
     Ok(merkle_dir.join(format!("{}@{}.merkle.bin", name, tag)))
 }
 
-#[cfg(unix)]
-fn is_root() -> bool {
-    unsafe { libc::geteuid() == 0 }
-}
-#[cfg(not(unix))]
-fn is_root() -> bool {
-    false
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+    use tempfile::tempdir;
+
+    #[test]
+    fn parse_query_default_level() {
+        let cli = Cli::parse_from(["dsf", "query", "mnist@v1"]);
+        match cli.command {
+            Commands::Query {
+                id,
+                level,
+                show_diff,
+            } => {
+                assert_eq!(id, "mnist@v1");
+                assert_eq!(level, VerifyLevel::SelfOnly);
+                assert!(!show_diff);
+            }
+            _ => panic!("expected Query"),
+        }
+    }
+
+    #[test]
+    fn parse_query_deep_with_diff() {
+        let cli = Cli::parse_from(["dsf", "query", "mnist@v1", "--level", "deep", "--show-diff"]);
+        match cli.command {
+            Commands::Query {
+                id,
+                level,
+                show_diff,
+            } => {
+                assert_eq!(id, "mnist@v1");
+                assert_eq!(level, VerifyLevel::Deep);
+                assert!(show_diff);
+            }
+            _ => panic!("expected Query"),
+        }
+    }
+
+    #[test]
+    fn parse_init_flags() {
+        let cli = Cli::parse_from(["dsf", "init", "--global", "--non-interactive"]);
+        match cli.command {
+            Commands::Init {
+                global,
+                non_interactive,
+            } => {
+                assert!(global);
+                assert!(non_interactive);
+            }
+            _ => panic!("expected Init"),
+        }
+    }
+
+    #[test]
+    fn parse_query_meta_only_level() {
+        let cli = Cli::parse_from(["dsf", "query", "mnist@v1", "--level", "meta-only"]);
+        match cli.command {
+            Commands::Query {
+                id,
+                level,
+                show_diff,
+            } => {
+                assert_eq!(id, "mnist@v1");
+                assert_eq!(level, VerifyLevel::MetaOnly);
+                assert!(!show_diff);
+            }
+            _ => panic!("expected Query"),
+        }
+    }
+
+    #[test]
+    fn parse_register_minimal_required_args() {
+        let cli = Cli::parse_from([
+            "dsf",
+            "register",
+            "--name",
+            "mnist",
+            "--tag",
+            "v1",
+            "--path",
+            "/tmp/data",
+            "--script-path",
+            "/tmp/build.py",
+        ]);
+        match cli.command {
+            Commands::Register {
+                name,
+                tag,
+                path,
+                script_path,
+                description_path,
+                dependencies,
+                force_heal,
+                yes,
+            } => {
+                assert_eq!(name, "mnist");
+                assert_eq!(tag, "v1");
+                assert_eq!(path, PathBuf::from("/tmp/data"));
+                assert_eq!(script_path, PathBuf::from("/tmp/build.py"));
+                assert!(description_path.is_none());
+                assert!(dependencies.is_empty());
+                assert!(!force_heal);
+                assert!(!yes);
+            }
+            _ => panic!("expected Register"),
+        }
+    }
+
+    #[test]
+    fn parse_register_with_optional_args_and_multi_deps() {
+        let cli = Cli::parse_from([
+            "dsf",
+            "register",
+            "--name",
+            "mnist",
+            "--tag",
+            "v2",
+            "--path",
+            "/tmp/data",
+            "--script-path",
+            "/tmp/build.py",
+            "--description-path",
+            "/tmp/desc.md",
+            "--deps",
+            "raw@v1",
+            "--deps",
+            "norm@v3",
+            "--force-heal",
+            "--yes",
+        ]);
+        match cli.command {
+            Commands::Register {
+                description_path,
+                dependencies,
+                force_heal,
+                yes,
+                ..
+            } => {
+                assert_eq!(description_path, Some(PathBuf::from("/tmp/desc.md")));
+                assert_eq!(
+                    dependencies,
+                    vec!["raw@v1".to_string(), "norm@v3".to_string()]
+                );
+                assert!(force_heal);
+                assert!(yes);
+            }
+            _ => panic!("expected Register"),
+        }
+    }
+
+    #[test]
+    fn parse_delete_flags() {
+        let cli = Cli::parse_from(["dsf", "delete", "mnist@v1", "--force", "--yes"]);
+        match cli.command {
+            Commands::Delete { id, force, yes } => {
+                assert_eq!(id, "mnist@v1");
+                assert!(force);
+                assert!(yes);
+            }
+            _ => panic!("expected Delete"),
+        }
+    }
+
+    #[test]
+    fn parse_update_command() {
+        let cli = Cli::parse_from(["dsf", "update", "mnist@v1"]);
+        match cli.command {
+            Commands::Update { id } => assert_eq!(id, "mnist@v1"),
+            _ => panic!("expected Update"),
+        }
+    }
+
+    // ---------- validate_dataset_id ----------
+
+    #[test]
+    fn validate_dataset_id_accepts_normal_form() {
+        assert!(validate_dataset_id("name@tag").is_ok());
+        assert!(validate_dataset_id("dataset_01@2026-07-08").is_ok());
+    }
+
+    #[test]
+    fn validate_dataset_id_rejects_missing_or_invalid_separator() {
+        assert!(validate_dataset_id("nametag").is_err()); // no @
+        assert!(validate_dataset_id("@tag").is_err()); // empty name
+        assert!(validate_dataset_id("name@").is_err()); // empty tag
+        assert!(validate_dataset_id("a@b@c").is_err()); // too many @
+        assert!(validate_dataset_id("@").is_err()); // both empty
+    }
+
+    // ---------- validate_name_tag ----------
+
+    #[test]
+    fn validate_name_tag_accepts_valid_inputs() {
+        assert!(validate_name_tag("mnist", "v1").is_ok());
+        assert!(validate_name_tag("data-set", "2026").is_ok());
+    }
+
+    #[test]
+    fn validate_name_tag_rejects_empty_or_contains_at() {
+        assert!(validate_name_tag("", "v1").is_err());
+        assert!(validate_name_tag("mnist", "").is_err());
+        assert!(validate_name_tag("m@nist", "v1").is_err());
+        assert!(validate_name_tag("mnist", "v@1").is_err());
+    }
+
+    // ---------- fmt_query ----------
+
+    #[test]
+    fn fmt_query_contains_status_text() {
+        let healthy = fmt_query(DataSetStatus::Healthy);
+        let broken = fmt_query(DataSetStatus::Broken);
+        let broken_deps = fmt_query(DataSetStatus::BrokenDpes);
+        let unverified = fmt_query(DataSetStatus::Unverified);
+
+        // colored string 可能包含 ANSI，做 contains 即可
+        assert!(healthy.contains("Healthy"));
+        assert!(broken.contains("Broken"));
+        assert!(broken_deps.contains("BrokenDeps"));
+        assert!(unverified.contains("Unverified"));
+    }
+
+    // ---------- ensure_exists ----------
+
+    #[test]
+    fn ensure_exists_passes_for_existing_file_and_dir() {
+        let dir = tempdir().expect("create temp dir");
+        let file = dir.path().join("a.txt");
+        std::fs::write(&file, "ok").expect("write temp file");
+
+        assert!(ensure_exists(dir.path(), "--path").is_ok());
+        assert!(ensure_exists(&file, "--script-path").is_ok());
+    }
+
+    #[test]
+    fn ensure_exists_fails_for_missing_path() {
+        let dir = tempdir().expect("create temp dir");
+        let missing = dir.path().join("not_found.txt");
+
+        let err = ensure_exists(&missing, "--path").unwrap_err().to_string();
+        assert!(err.contains("--path"));
+        assert!(err.contains("doesn't exist"));
+    }
+
+    // ---------- build_default_merkle_path ----------
+
+    #[test]
+    fn build_default_merkle_path_has_expected_file_name() {
+        let p = build_default_merkle_path("mnist", "v1").expect("build path");
+        let fname = p.file_name().unwrap().to_string_lossy().to_string();
+        assert_eq!(fname, "mnist@v1.merkle.bin");
+    }
+
+    #[test]
+    fn build_default_merkle_path_parent_dir_exists_after_call() {
+        let p = build_default_merkle_path("abc", "t1").expect("build path");
+        let parent = p.parent().expect("parent dir");
+        assert!(parent.exists(), "parent dir should be created");
+    }
+
+    // ---------- smoke for print_query ----------
+
+    #[test]
+    fn print_query_smoke_no_panic() {
+        print_query("mnist@v1", DataSetStatus::Healthy, &[]);
+        print_query(
+            "mnist@v1",
+            DataSetStatus::BrokenDpes,
+            &[DataSetStatus::Healthy, DataSetStatus::Broken],
+        );
+    }
 }

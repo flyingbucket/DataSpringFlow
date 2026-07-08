@@ -33,10 +33,14 @@ dirs = "6"
 
 # cli
 clap = { version = "4", features = ["derive"] }
-dialoguer = "0.12"                              # 交互式终端提示（选择、确认框）
-colored = "3"                                   # 终端文字着色
+dialoguer = "0.12"                                  # 交互式终端提示（选择、确认框）
+colored = "3"                                       # 终端文字着色
 anyhow = "1.0.103"
 libc = "0.2.186"
+strum = { version = "0.28", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3"
+assert_cmd = "2.0"
+predicates = "3.0" # 用于字符串正则和断言匹配
+assert_fs = "1.0"  # 临时沙盒文件系统
