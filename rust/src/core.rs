@@ -1,5 +1,5 @@
 use crate::{
-    backend::DatasetBackend,
+    backend::BackendRef,
     dag::{DatasetGraph, DatasetGraphError},
     merkle::{FileMerkleTree, HashRes, MerkleTreeSnapshot},
     utils::hashres_to_hex,
@@ -21,11 +21,11 @@ pub struct MetaData {
 }
 
 impl MetaData {
-    pub fn id(&self) -> String {
+    pub(crate) fn id(&self) -> String {
         format!("{}@{}", self.name, self.tag)
     }
 
-    pub fn new(
+    pub(crate) fn new(
         name: &str,
         tag: &str,
         path: PathBuf,
@@ -62,11 +62,6 @@ impl MetaData {
 
         Ok(meta)
     }
-
-    pub fn commit(&self, backend: &impl DatasetBackend) -> io::Result<()> {
-        backend.save_metadata(self)?;
-        Ok(())
-    }
 }
 
 /// Runtime dataset struct
@@ -90,7 +85,7 @@ pub struct DataSetVerifyRes {
 }
 
 impl DSFDataSet {
-    pub fn load_from_id(id: &str, backend: &impl DatasetBackend) -> io::Result<Self> {
+    pub(crate) fn load_from_id(id: &str, backend: BackendRef) -> io::Result<Self> {
         let metadata = backend.get_metadata(id)?;
 
         Ok(DSFDataSet {
@@ -104,7 +99,7 @@ impl DSFDataSet {
 
     pub fn verify(
         &mut self,
-        backend: &impl DatasetBackend,
+        backend: BackendRef,
         show_diff: bool,
     ) -> Result<DataSetVerifyRes, DatasetGraphError> {
         let root_id = self.metadata.id();
@@ -114,7 +109,7 @@ impl DSFDataSet {
         Ok(res)
     }
 
-    pub fn verify_single(
+    pub(crate) fn verify_single(
         &mut self,
         show_diff: bool,
         dep_statuses: &[DataSetStatus],
@@ -148,8 +143,23 @@ impl DSFDataSet {
         Ok(detailed_status)
     }
 
+    pub(crate) fn commit(&self, backend: BackendRef) -> io::Result<()> {
+        backend.save_metadata(&self.metadata)?;
+        Ok(())
+    }
+    pub(crate) fn refresh_hash_and_merkle(&mut self) -> io::Result<()> {
+        let mut merkle = FileMerkleTree::new(self.metadata.path.clone())?;
+        self.metadata.hash = hashres_to_hex(merkle.get_hash()?);
+        merkle.save_to_disk(&self.metadata.merkle_tree_path)?;
+        Ok(())
+    }
+    pub(crate) fn refresh_and_commit(&mut self, backend: BackendRef<'_>) -> io::Result<()> {
+        self.refresh_hash_and_merkle()?;
+        self.commit(backend)
+    }
+
     /// TODO: need UI or frontend refactor
-    pub fn find_differences(&self, old_tree: &MerkleTreeSnapshot, current_tree: &FileMerkleTree) {
+    fn find_differences(&self, old_tree: &MerkleTreeSnapshot, current_tree: &FileMerkleTree) {
         let old_map: HashMap<PathBuf, HashRes> = old_tree
             .entries
             .iter()

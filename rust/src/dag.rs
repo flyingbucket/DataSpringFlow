@@ -1,4 +1,4 @@
-use crate::backend::DatasetBackend;
+use crate::backend::BackendRef;
 use crate::core::{DSFDataSet, DataSetVerifyRes};
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -52,7 +52,7 @@ impl DatasetGraph {
     }
 
     /// build reachable subgraph starting from root_id, return in Adjacency List form
-    pub fn from_root(root_id: &str, backend: &impl DatasetBackend) -> io::Result<Self> {
+    pub fn from_root(root_id: &str, backend: BackendRef) -> io::Result<Self> {
         let mut graph = Self::new();
         let mut to_visit = vec![root_id.to_string()];
         let mut visited = HashSet::new();
@@ -86,7 +86,7 @@ impl DatasetGraph {
         name: &str,
         tag: &str,
         dependencies: &[String],
-        backend: &impl DatasetBackend,
+        backend: BackendRef,
     ) -> Result<Self, DatasetGraphError> {
         if name.contains('@') || tag.contains('@') {
             return Err(io::Error::new(

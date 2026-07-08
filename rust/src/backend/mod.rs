@@ -1,4 +1,6 @@
+use crate::config::{AppConfig, BackendConfig};
 use crate::core::MetaData;
+
 use std::io;
 use thiserror::Error;
 
@@ -22,10 +24,10 @@ pub trait DatasetBackend {
 
 #[derive(Error, Debug)]
 pub enum BackendError {
-    #[error("数据集未找到: {id}")]
+    #[error("Data set not found: {id}")]
     NotFound { id: String },
 
-    #[error("数据库连接失败: {0}")]
+    #[error("Backend connection broken: {0}")]
     ConnectionError(String),
 
     #[error("底层存储执行错误: {0}")]
@@ -39,3 +41,15 @@ pub enum BackendError {
 }
 
 pub type BackendResult<T> = Result<T, BackendError>;
+
+pub type DynBackend = Box<dyn DatasetBackend + Send + Sync>;
+pub type BackendRef<'a> = &'a (dyn DatasetBackend + Send + Sync);
+
+pub fn build_backend_auto() -> io::Result<DynBackend> {
+    let cfg = AppConfig::load()?;
+    match &cfg.backend {
+        BackendConfig::Sqlite(sqlite_cfg) => Ok(Box::new(SqliteBackend::new(sqlite_cfg.clone())?)),
+        // BackendConfig::Yaml(yaml_cfg) => ...
+        // BackendConfig::Remote(remote_cfg) => ...
+    }
+}

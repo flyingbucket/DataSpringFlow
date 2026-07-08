@@ -46,7 +46,7 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    pub fn resolve_path() -> (InstallMode, PathBuf) {
+    pub(crate) fn resolve_path() -> (InstallMode, PathBuf) {
         // P0: 优先检查环境变量覆盖 (DSF_CONFIG_PATH)
         if let Some(path) = env::var_os("DSF_CONFIG_PATH").map(PathBuf::from) {
             return (InstallMode::Custom, path);
@@ -67,7 +67,7 @@ impl AppConfig {
         )
     }
 
-    pub fn load() -> io::Result<Self> {
+    pub(crate) fn load() -> io::Result<Self> {
         let (mode, config_path) = Self::resolve_path();
         println!("{}", "--- DEBUG: Configuration load triggered ---".red());
         println!("Backtrace:\n{}", Backtrace::capture());
@@ -108,11 +108,11 @@ impl AppConfig {
 }
 
 #[cfg(unix)]
-pub fn is_root() -> bool {
+pub(crate) fn is_root() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
 
 #[cfg(not(unix))]
-pub fn is_root() -> bool {
+pub(crate) fn is_root() -> bool {
     false
 }

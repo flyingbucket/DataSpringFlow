@@ -1,5 +1,4 @@
 use crate::backend::DatasetBackend;
-use crate::config::{AppConfig, BackendConfig};
 use crate::core::MetaData;
 use r2d2::Pool;
 use r2d2::PooledConnection;
@@ -63,25 +62,7 @@ pub struct SqliteBackend {
 }
 
 impl SqliteBackend {
-    /// 自动从配置文件加载：
-    /// 1) $HOME/.config/dsf/config.yaml
-    /// 2) /etc/dsf/config.yaml
-    /// 3) 都没有则默认配置
-    pub fn new() -> io::Result<Self> {
-        let backend_cfg = AppConfig::load()?.backend;
-
-        #[allow(unreachable_patterns)]
-        match backend_cfg {
-            BackendConfig::Sqlite(sqlite_cfg) => Self::from_config(sqlite_cfg),
-            _ => Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Failed to initialize SqliteBackend: The active backend in config.yaml is NOT sqlite.",
-            )),
-        }
-    }
-
-    /// 允许在测试/特殊场景直接传配置
-    pub fn from_config(cfg: SqliteConfig) -> io::Result<Self> {
+    pub(crate) fn new(cfg: SqliteConfig) -> io::Result<Self> {
         if let Some(parent) = cfg.db_path.parent()
             && !parent.as_os_str().is_empty()
         {
