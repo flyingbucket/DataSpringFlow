@@ -53,7 +53,7 @@ impl AppConfig {
         }
 
         // P1: XDG 标准用户目录探测
-        if let Some(proj_dirs) = ProjectDirs::from("org", "dataspringflow", "dsf") {
+        if let Some(proj_dirs) = ProjectDirs::from("io", "flyingbucket", "dataspringflow") {
             let user_config = proj_dirs.config_dir().join("config.yaml");
             if user_config.exists() || !is_root() {
                 return (InstallMode::User, user_config);
@@ -69,8 +69,6 @@ impl AppConfig {
 
     pub(crate) fn load() -> io::Result<Self> {
         let (mode, config_path) = Self::resolve_path();
-        println!("{}", "--- DEBUG: Configuration load triggered ---".red());
-        println!("Backtrace:\n{}", Backtrace::capture());
         if !config_path.exists() {
             println!(
                 "{}",
