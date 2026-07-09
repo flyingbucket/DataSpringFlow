@@ -88,12 +88,13 @@ impl MetaData {
 }
 
 /// Runtime dataset struct
+#[derive(Debug)]
 pub struct DSFDataSet {
     pub metadata: MetaData,
     pub detailed_status: DataSetVerifyRes,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataSetStatus {
     Healthy,
     Broken,
@@ -101,7 +102,7 @@ pub enum DataSetStatus {
     Unverified,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DataSetVerifyRes {
     pub status: DataSetStatus,
     pub dep_status: Vec<DataSetStatus>,
