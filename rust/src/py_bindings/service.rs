@@ -35,7 +35,7 @@ impl PyDSFService {
     }
 
     /// Register a new dataset with full options
-    #[pyo3(signature = (name, tag, path, script_path, dependencies=None, description_path=None, force_heal=false, yes=false))]
+    #[pyo3(signature = (name, tag, path, script_path, owner_nickname=None,dependencies=None, description_path=None, force_heal=false, yes=false))]
     #[allow(clippy::too_many_arguments)]
     pub fn register(
         &self,
@@ -43,6 +43,7 @@ impl PyDSFService {
         tag: String,
         path: String,
         script_path: String,
+        owner_nickname: Option<String>,
         dependencies: Option<Vec<String>>,
         description_path: Option<String>,
         force_heal: bool,
@@ -54,6 +55,7 @@ impl PyDSFService {
             path: PathBuf::from(path),
             description_path: description_path.map(PathBuf::from),
             script_path: PathBuf::from(script_path),
+            owner_nickname,
             dependencies: dependencies.unwrap_or_default(),
             force_heal,
             yes,

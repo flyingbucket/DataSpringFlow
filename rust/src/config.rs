@@ -2,7 +2,7 @@ use crate::backend::SqliteConfig;
 use colored::Colorize;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use std::backtrace::Backtrace;
+// use std::backtrace::Backtrace;
 use std::env;
 use std::fs;
 use std::io::{self, Error, ErrorKind};

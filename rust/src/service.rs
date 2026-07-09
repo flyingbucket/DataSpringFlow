@@ -19,6 +19,7 @@ pub struct RegisterOptions {
     pub path: PathBuf,
     pub description_path: Option<PathBuf>,
     pub script_path: PathBuf,
+    pub owner_nickname: Option<String>,
     pub dependencies: Vec<String>,
     pub force_heal: bool,
     pub yes: bool,
@@ -99,6 +100,7 @@ impl DSFService {
             opts.path,
             opts.description_path,
             opts.script_path,
+            opts.owner_nickname,
             opts.dependencies,
             merkle_tree_path,
         )?;

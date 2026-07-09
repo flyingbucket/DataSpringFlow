@@ -62,6 +62,8 @@ pub enum Commands {
         #[arg(long)]
         script_path: PathBuf,
         #[arg(long)]
+        owner_nickname: Option<String>,
+        #[arg(long)]
         description_path: Option<PathBuf>,
         #[arg(long = "deps")]
         dependencies: Vec<String>,
@@ -110,6 +112,7 @@ pub fn run(cli: Cli) -> Result<()> {
             tag,
             path,
             script_path,
+            owner_nickname,
             description_path,
             dependencies,
             force_heal,
@@ -120,6 +123,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 tag,
                 path,
                 script_path,
+                owner_nickname,
                 description_path,
                 dependencies,
                 force_heal,
@@ -554,6 +558,7 @@ mod tests {
                 tag,
                 path,
                 script_path,
+                owner_nickname,
                 description_path,
                 dependencies,
                 force_heal,
@@ -563,6 +568,7 @@ mod tests {
                 assert_eq!(tag, "v1");
                 assert_eq!(path, PathBuf::from("/tmp/data"));
                 assert_eq!(script_path, PathBuf::from("/tmp/build.py"));
+                assert!(owner_nickname.is_none());
                 assert!(description_path.is_none());
                 assert!(dependencies.is_empty());
                 assert!(!force_heal);

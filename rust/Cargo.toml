@@ -12,10 +12,6 @@ name = "dsf"
 path = "src/bin/dsf.rs"
 required-features = ["cli"]
 
-# [[bin]]
-# name = "stub_gen"
-# path = "src/bin/stub_gen.rs"
-
 [features]
 default = []
 py_bindings = ["dep:pyo3"]
@@ -56,6 +52,7 @@ libc = "0.2"
 anyhow = "1"                                                     # CLI optional deps
 clap = { version = "4", features = ["derive"], optional = true }
 dialoguer = { version = "0.12", optional = true }
+whoami = "2.1.2"
 
 [dev-dependencies]
 tempfile = "3"

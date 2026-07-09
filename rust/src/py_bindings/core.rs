@@ -78,6 +78,8 @@ pub struct PyMetaData {
     #[pyo3(get)]
     pub script_path: String,
     #[pyo3(get)]
+    pub owner: String,
+    #[pyo3(get)]
     pub dependencies: Vec<String>,
     #[pyo3(get)]
     pub merkle_tree_path: String,
@@ -109,6 +111,7 @@ impl From<MetaData> for PyMetaData {
             path: meta.path.to_string_lossy().to_string(),
             description_path: meta.description_path.to_string_lossy().to_string(),
             script_path: meta.script_path.to_string_lossy().to_string(),
+            owner: meta.owner,
             dependencies: meta.dependencies,
             merkle_tree_path: meta.merkle_tree_path.to_string_lossy().to_string(),
         }

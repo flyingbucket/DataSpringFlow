@@ -1,8 +1,5 @@
-use directories::ProjectDirs;
 use std::collections::HashMap;
-use std::fs;
-use std::io::Write;
-use std::io::{self, Error, ErrorKind};
+use std::io;
 use std::path::PathBuf;
 
 use crate::{
@@ -11,6 +8,38 @@ use crate::{
     merkle::{FileMerkleTree, HashRes, MerkleTreeSnapshot},
     utils::hashres_to_hex,
 };
+
+use std::fmt;
+
+#[derive(Debug)]
+pub enum MetaDataError {
+    InvalidName(String),
+    InvalidTag(String),
+    OwnerResolveFailed(String),
+    InvalidNickname(String),
+    Io(io::Error),
+}
+
+impl fmt::Display for MetaDataError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MetaDataError::InvalidName(msg) => write!(f, "invalid metadata name: {msg}"),
+            MetaDataError::InvalidTag(msg) => write!(f, "invalid metadata tag: {msg}"),
+            MetaDataError::OwnerResolveFailed(msg) => write!(f, "failed to resolve owner: {msg}"),
+            MetaDataError::InvalidNickname(msg) => write!(f, "invalid owner nickname: {msg}"),
+            MetaDataError::Io(err) => write!(f, "io error: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for MetaDataError {}
+
+impl From<io::Error> for MetaDataError {
+    fn from(value: io::Error) -> Self {
+        MetaDataError::Io(value)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct MetaData {
     pub name: String,
@@ -19,6 +48,7 @@ pub struct MetaData {
     pub path: PathBuf,
     pub description_path: PathBuf,
     pub script_path: PathBuf,
+    pub owner: String,
     pub dependencies: Vec<String>,
     pub merkle_tree_path: PathBuf,
 }
@@ -34,21 +64,21 @@ impl MetaData {
         path: PathBuf,
         description_path: Option<PathBuf>,
         script_path: PathBuf,
+        owner_nickname: Option<String>,
         dependencies: Vec<String>,
         merkle_tree_path: PathBuf,
-    ) -> io::Result<Self> {
+    ) -> Result<Self, MetaDataError> {
         if name.contains('@') {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "Metadata name must not contain '@'",
+            return Err(MetaDataError::InvalidName(
+                "name must not contain '@'".to_string(),
             ));
         }
         if tag.contains('@') {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "Metadata tag must not contain '@'",
+            return Err(MetaDataError::InvalidTag(
+                "tag must not contain '@'".to_string(),
             ));
         }
+
         let mut merkle_tree = FileMerkleTree::new(path.clone())?;
         let hash = hashres_to_hex(merkle_tree.get_hash()?);
         merkle_tree.save_to_disk(&merkle_tree_path)?;
@@ -56,15 +86,17 @@ impl MetaData {
         let final_description_path = match description_path {
             Some(p) => p,
             None => {
-                let desc_dir = ProjectDirs::from("io", "flyingbucket", "dataspringflow")
-                    .map(|proj| proj.data_dir().join("descriptions"))
-                    .unwrap_or_else(|| std::path::PathBuf::from("./data/descriptions"));
+                let desc_dir =
+                    directories::ProjectDirs::from("io", "flyingbucket", "dataspringflow")
+                        .map(|proj| proj.data_dir().join("descriptions"))
+                        .unwrap_or_else(|| std::path::PathBuf::from("./data/descriptions"));
 
-                fs::create_dir_all(&desc_dir)?;
+                std::fs::create_dir_all(&desc_dir)?;
                 let p = desc_dir.join(format!("{}_{}.md", name, tag));
 
                 if !p.exists() {
-                    let mut f = fs::File::create(&p)?;
+                    let mut f = std::fs::File::create(&p)?;
+                    use std::io::Write;
                     writeln!(f, "# {}@{}", name, tag)?;
                     writeln!(f)?;
                     writeln!(f, "<!-- TODO: add dataset description -->")?;
@@ -72,18 +104,62 @@ impl MetaData {
                 p
             }
         };
-        let meta = Self {
+
+        let owner = Self::merge_owner_name(owner_nickname)?;
+
+        Ok(Self {
             name: name.to_string(),
             tag: tag.to_string(),
             hash,
             path,
             description_path: final_description_path,
             script_path,
+            owner,
             dependencies,
             merkle_tree_path,
-        };
+        })
+    }
 
-        Ok(meta)
+    fn merge_owner_name(nickname: Option<String>) -> Result<String, MetaDataError> {
+        let linux_user = whoami::username().map_err(|e| {
+            MetaDataError::OwnerResolveFailed(format!("OS username unavailable: {e}"))
+        })?;
+
+        let linux_user = linux_user.trim();
+        if linux_user.is_empty() {
+            return Err(MetaDataError::OwnerResolveFailed(
+                "OS username is empty".to_string(),
+            ));
+        }
+
+        let nick = nickname.unwrap_or_default().trim().to_string();
+        if nick.is_empty() {
+            return Ok(linux_user.to_string());
+        }
+
+        if nick.contains('$') {
+            return Err(MetaDataError::InvalidNickname(
+                "nickname must not contain '$'".to_string(),
+            ));
+        }
+
+        let is_valid = nick
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-');
+
+        if !is_valid {
+            return Err(MetaDataError::InvalidNickname(
+                "nickname can only contain [a-zA-Z0-9._-]".to_string(),
+            ));
+        }
+
+        if nick.len() > 32 {
+            return Err(MetaDataError::InvalidNickname(
+                "nickname length must be <= 32".to_string(),
+            ));
+        }
+
+        Ok(format!("{linux_user}${nick}"))
     }
 }
 
