@@ -143,7 +143,7 @@ impl DSFService {
         Ok(())
     }
 
-    /// 深度校验
+    /// verify all dependencies on DAG subgraph
     pub fn verify_deep(
         &self,
         id: &str,
@@ -153,10 +153,22 @@ impl DSFService {
         ds.verify(self.backend(), show_diff)
     }
 
-    /// 仅校验自身
+    /// verify self only
     pub fn verify_self(&self, id: &str, show_diff: bool) -> Result<DataSetVerifyRes> {
         validate_dataset_id(id)?;
         let mut ds = DSFDataSet::load_from_id(id, self.backend())?;
         Ok(ds.verify_single(show_diff, &[])?)
+    }
+
+    /// list all metadata registered on this machine
+    /// wrap and expose from backend
+    pub fn list_all_metadata(&self) -> io::Result<Vec<MetaData>> {
+        self.backend.list_all_metadata()
+    }
+
+    /// list all datasets that depend on <target_id>
+    /// wrap and expose from backend
+    pub fn check_is_referenced(&self, target_id: &str) -> io::Result<Vec<String>> {
+        self.backend.check_is_referenced(target_id)
     }
 }

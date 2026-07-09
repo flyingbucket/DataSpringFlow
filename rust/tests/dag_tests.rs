@@ -91,8 +91,7 @@ mod tests {
                 match cycle_res {
                     // check_cycle() 返回的是 DatasetGraphError
                     Err(DatasetGraphError::CycleDetected { node, dep }) => {
-                        let pairs =
-                            vec![(node.as_str(), dep.as_str()), (dep.as_str(), node.as_str())];
+                        let pairs = [(node.as_str(), dep.as_str()), (dep.as_str(), node.as_str())];
                         assert!(pairs.contains(&("A@v1", "B@v1")));
                     }
                     _ => panic!(

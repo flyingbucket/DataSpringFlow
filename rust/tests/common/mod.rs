@@ -36,22 +36,31 @@ impl DatasetBackend for MemoryBackend {
     }
 
     fn check_is_referenced(&self, target_id: &str) -> io::Result<Vec<String>> {
-        let _ = target_id;
-        todo!()
+        let store = self.store.read().unwrap();
+        let mut referrers = Vec::new();
+        // 遍历所有元数据，检查谁的 dependencies 包含了 target_id
+        for meta in store.values() {
+            if meta.dependencies.contains(&target_id.to_string()) {
+                referrers.push(meta.id());
+            }
+        }
+        Ok(referrers)
     }
 
     fn list_all_metadata(&self) -> io::Result<Vec<MetaData>> {
-        todo!()
+        let store = self.store.read().unwrap();
+        Ok(store.values().cloned().collect())
     }
 
     fn delete_metadata(&self, id: &str) -> io::Result<()> {
-        let _ = id;
-        todo!()
+        let mut store = self.store.write().unwrap();
+        store.remove(id);
+        Ok(())
     }
 }
 
 pub struct TestSandbox {
-    base_dir: PathBuf,
+    pub(crate) base_dir: PathBuf,
 }
 
 impl TestSandbox {
