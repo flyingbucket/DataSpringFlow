@@ -57,7 +57,7 @@ impl MetaData {
     pub fn id(&self) -> String {
         format!("{}@{}", self.name, self.tag)
     }
-
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: &str,
         tag: &str,

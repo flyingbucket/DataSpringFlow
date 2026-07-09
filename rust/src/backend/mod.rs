@@ -7,20 +7,26 @@ use thiserror::Error;
 mod sqlite_backend;
 pub use sqlite_backend::{SqliteBackend, SqliteConfig};
 
+mod stacked_backend;
+
 pub trait DatasetBackend {
-    /// 根据数据集 ID 获取对应的元数据
+    /// Retrieves the corresponding metadata by the dataset ID.
     fn get_metadata(&self, id: &str) -> io::Result<MetaData>;
-
-    /// 保存或更新数据集元数据
+    /// Saves or updates the dataset metadata.
     fn save_metadata(&self, metadata: &MetaData) -> io::Result<()>;
-
-    /// 检查是否有任何数据集依赖了指定的 target_id
+    /// Checks if any datasets depend on the specified `target_id`.
+    ///
+    /// Returns a list of dataset IDs that reference the target.
     fn check_is_referenced(&self, target_id: &str) -> io::Result<Vec<String>>;
-
+    /// Lists all available dataset metadata from the backend.
     fn list_all_metadata(&self) -> io::Result<Vec<MetaData>>;
-
+    /// Deletes the metadata associated with the specified dataset ID.
+    /// note: this mucntion only deletes the metadata and detach this dataset from backend regisitration,
+    /// real data on disk will be safe
     fn delete_metadata(&self, id: &str) -> io::Result<()>;
 }
+pub type DynBackend = Box<dyn DatasetBackend + Send + Sync>;
+pub type BackendRef<'a> = &'a (dyn DatasetBackend + Send + Sync);
 
 #[derive(Error, Debug)]
 pub enum BackendError {
@@ -30,20 +36,16 @@ pub enum BackendError {
     #[error("Backend connection broken: {0}")]
     ConnectionError(String),
 
-    #[error("底层存储执行错误: {0}")]
+    #[error("Underlying storage execution error: {0}")]
     StorageError(#[from] rusqlite::Error),
 
-    #[error("元数据序列化/反序列化失败: {0}")]
+    #[error("Metadata serialization/deserialization failed: {0}")]
     SerializationError(String),
 
-    #[error("通用输入输出错误: {0}")]
+    #[error("General I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
-
 pub type BackendResult<T> = Result<T, BackendError>;
-
-pub type DynBackend = Box<dyn DatasetBackend + Send + Sync>;
-pub type BackendRef<'a> = &'a (dyn DatasetBackend + Send + Sync);
 
 pub fn build_backend_auto() -> io::Result<DynBackend> {
     let cfg = AppConfig::load()?;

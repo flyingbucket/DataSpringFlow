@@ -89,6 +89,7 @@ impl TestSandbox {
     }
 
     /// 模拟篡改磁盘上的数据（用来测试损毁校验）
+    #[allow(dead_code)]
     pub fn tamper_file(&self, folder_name: &str, new_content: &str) {
         let file_path = self.base_dir.join(folder_name).join("data.txt");
         let mut file = File::create(file_path).unwrap();
