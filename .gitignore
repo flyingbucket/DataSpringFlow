@@ -2,14 +2,14 @@
 *.egg-info
 *__pycache__
 
-# rust 
-rust/target
-rust/*/target
-rust/*/Cargo.lock
-
 # ide and tools
 .vscode/
 
+# rust
+rust/target/
+rust/*/target
+rust/*/Cargo.lock
+
 # artifacts
-*.so 
+*.so
 *.db
