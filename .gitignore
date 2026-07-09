@@ -9,3 +9,7 @@ rust/*/Cargo.lock
 
 # ide and tools
 .vscode/
+
+# artifacts
+*.so 
+*.db
