@@ -1,90 +1,46 @@
 # DataSpringFlow
 
-一个用于深度学习数据集管理的 Python 工具，提供数据集版本控制、完整性校验、依赖追踪和**可恢复删除**功能。
+面向深度学习场景的数据集元数据管理工具。  
+DataSpringFlow 的核心目标是：**把数据集之间的派生关系组织为 DAG（有向无环图）**，并提供基于哈希的**一致性校验**能力，帮助你在多阶段数据处理流程中稳定管理数据集版本与依赖。
 
-## 设计背景
+> 当前版本聚焦：
+>
+> - 数据集注册与查询
+> - 依赖关系（DAG）组织与追踪
+> - 数据集一致性校验（含依赖校验）
+>
+> 当前版本不包含：
+>
+> - 数据删除/回收站
+> - 自动恢复重建流程
 
-### 问题场景
+---
 
-在高校深度学习课题组中，算力资源通常采用**单服务器、多用户**的共享模式。在实际研究过程中，一个原始数据集往往会经过多次处理产生多种变体：
+## 设计目标
 
-```
-原始数据集
-    ├── 数据清洗 → 清洗后数据集
-    ├── 图片切割 → 切割后数据集
-    ├── 数据增强 → 增强后数据集
-    └── 标注修正 → 修正后数据集
-         └── 格式转换 → 最终训练集
-```
+在实际训练流程中，一个原始数据集往往会经过多次加工，形成多个派生版本,如清洗版、特化版或与其他数据集混合、筛选所得的新数据集。
 
-这些"子数据集"通常由**与项目逻辑耦合的处理脚本**生成。随着项目的推进，派生数据集会不断累积，占用大量磁盘空间。
+这些数据集之间天然存在“从上游派生到下游”的依赖关系。  
+DataSpringFlow 把这种关系显式建模为 DAG，并围绕 DAG 提供：
 
-### 核心痛点
+1. 元数据统一注册（`name@tag`）
+2. 依赖关系追踪
+3. 哈希一致性校验（自身 + 依赖子图）
 
-1. **磁盘空间紧张** - 派生数据集占用大量存储，但项目结束后再次使用的概率很低
-2. **依赖关系混乱** - 难以追踪数据集之间的派生关系
-3. **数据完整性风险** - 共享环境下数据可能被意外修改或删除
-4. **恢复困难** - 删除后的数据集难以重建
+---
 
-### 解决方案
+## 当前能力概览
 
-DataSpringFlow 将原始数据集比作“泉水”，将子数据集比作“河流”，采用以下设计来解决上述问题：
+- **数据集标识**：使用 `name@tag` 唯一标识数据集
+- **元数据管理**：注册、查询、列出、删除元数据
+- **依赖关系建模**：在注册时声明 `dependencies`
+- **一致性校验**：
+  - 校验单个数据集（self）
+  - 沿依赖链深度校验（deep）
+- **引用检查**：检查某数据集是否被其他数据集引用
+- **Merkle 树相关信息**：用于一致性校验结果支撑（而非删除恢复）
 
-| 组件 | 功能 | 解决的问题 |
-|------|------|-----------|
-| **元数据注册表** | 记录数据集路径、名称、标签、生成脚本等信息 | 依赖关系混乱 |
-| **DAG 依赖图** | 使用有向无环图描述数据集之间的派生关系 | 依赖关系追踪 |
-| **Merkle 哈希树** | 对数据集进行一致性和完整性校验 | 数据完整性风险 |
-| **可恢复删除** | 保留元数据和生成脚本，支持按需重建数据 | 磁盘空间 & 恢复困难 |
-
-### 工作流程
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     DataSpringFlow 工作流程                       │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  1. 注册阶段                                                     │
-│     ┌──────────┐    处理脚本    ┌──────────┐                    │
-│     │ 父数据集  │ ────────────→ │ 子数据集  │                    │
-│     └──────────┘               └──────────┘                    │
-│           │                          │                          │
-│           └──────── 注册元数据 ────────┘                          │
-│                         ↓                                       │
-│              ┌───────────────────┐                              │
-│              │  Registry (注册表) │                              │
-│              │  - 路径、名称、标签  │                              │
-│              │  - Merkle 哈希树   │                              │
-│              │  - 依赖关系 (DAG)  │                              │
-│              │  - 生成脚本路径    │                              │
-│              └───────────────────┘                              │
-│                                                                 │
-│  2. 使用阶段                                                     │
-│     - 通过 name@tag 查询数据集                                    │
-│     - 使用 Merkle 树校验数据完整性                                 │
-│     - 遍历 DAG 检查上游依赖健康状况                                │
-│                                                                 │
-│  3. 清理阶段（项目结束后）                                         │
-│     - 删除子数据集文件，释放磁盘空间                                │
-│     - 保留元数据和生成脚本信息                                     │
-│                                                                 │
-│  4. 恢复阶段（需要时）                                            │
-│     - 根据 DAG 找到父数据集                                       │
-│     - 执行生成脚本重建子数据集                                     │
-│     - 使用 Merkle 树校验恢复后的数据一致性                          │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## 特性
-
-- **Merkle Tree 哈希校验** - 使用 Merkle 树结构对数据集进行快速完整性校验
-- **数据集版本管理** - 通过 `name@tag` 的方式管理数据集的不同版本
-- **依赖关系追踪 (DAG)** - 构建数据集之间的有向无环图，追踪上下游派生关系
-- **可恢复删除** - 删除数据集后保留元数据，支持通过生成脚本按需重建
-- **并行哈希计算** - 支持多线程并行计算大文件哈希，提升性能
-- **可插拔后端** - 支持不同的元数据存储后端（如 YAML）
-- **异步支持** - 提供同步和异步 API，适配不同使用场景（包括 Jupyter Notebook）
+---
 
 ## 安装
 
@@ -96,151 +52,166 @@ cd DataSpringFlow
 pip install -e .
 ```
 
-### 依赖项
+---
 
-- Python >= 3.9
-- pyyaml
-- joblib
+## Python 版本与构建
+
+- Python: `>=3.9`
+- 构建系统：`maturin`
+- Rust 扩展模块：`dataspringflow.dataspringflow_rs`
+
+项目通过 Rust + PyO3 暴露核心能力，Python 侧主要是 API 入口与类型接口。
+
+---
 
 ## 快速开始
 
-### 创建数据集注册表
-
 ```python
-from dataspringflow.core.registry import DSFRegistry
-from dataspringflow.core.metadata import MetadataBuilder
-from pathlib import Path
+from dataspringflow import DSFService
 
-# 初始化注册表
-registry = DSFRegistry(backend="yaml")
+svc = DSFService()
 
-# 创建数据集元数据
-builder = MetadataBuilder(
-    path=Path("/path/to/your/dataset"),
-    name="my_dataset",
-    tag="v1.0",
-    dependencies=()  # 依赖的其他数据集 ID，如 ("other_dataset@v1.0",)
+# 1) 注册一个“根数据集”
+svc.register(
+    name="raw_images",
+    tag="v1",
+    path="/data/raw_images_v1",
+    script_path="/workspace/scripts/prepare_raw.py",
+    dependencies=None,           # 或 []
+    description_path=None,
 )
 
-# 构建并保存
-metadata, hash_snapshot = builder.build()
-registry.save(metadata, hash_snapshot)
+# 2) 注册一个派生数据集（依赖 raw_images@v1）
+svc.register(
+    name="train_split",
+    tag="v1",
+    path="/data/train_split_v1",
+    script_path="/workspace/scripts/make_train_split.py",
+    dependencies=["raw_images@v1"],
+)
+
+# 3) 查询元数据
+meta = svc.query_meta("train_split@v1")
+print(meta.id())          # train_split@v1
+print(meta.path)
+print(meta.dependencies)  # ["raw_images@v1"]
+
+# 4) 校验自身一致性
+res_self = svc.verify_self("train_split@v1", show_diff=True)
+print(res_self.status)
+
+# 5) 深度校验（包含依赖）
+res_deep = svc.verify_deep("train_split@v1", show_diff=True)
+print(res_deep.status, res_deep.dep_status)
+
+# 6) 查看是否被引用
+ref_by = svc.check_is_referenced("raw_images@v1")
+print(ref_by)
+
+# 7) 列出全部元数据
+all_meta = svc.list_all_metadata()
+for m in all_meta:
+    print(m.id(), m.path)
 ```
 
-### 获取数据集
+---
 
-```python
-# 通过 name@tag 获取数据集
-dataset = registry.get("my_dataset@v1.0")
+## 核心对象与接口（当前代码）
 
-# 访问元数据
-print(dataset.info.name)
-print(dataset.info.tag)
-print(dataset.info.path)
-print(dataset.info.hash)
-```
+## `DSFService`
 
-### 校验数据集完整性
+服务入口，负责数据集元数据生命周期与校验调用。
 
-```python
-# 校验单个数据集
-is_valid, diff = dataset.verify()
+主要方法：
 
-if is_valid:
-    print("数据集完整性校验通过！")
-else:
-    print("数据集已被修改：")
-    print(f"  新增文件: {diff.added}")
-    print(f"  删除文件: {diff.removed}")
-    print(f"  修改文件: {diff.modified}")
-```
+- `query_meta(id: str) -> MetaData`
+- `register(name, tag, path, script_path, dependencies=None, description_path=None, force_heal=False, yes=False) -> None`
+- `update_merkle(id: str) -> None`
+- `delete_metadata(id: str, force=False) -> None`
+- `verify_deep(id: str, show_diff=False) -> DataSetVerifyRes`
+- `verify_self(id: str, show_diff=False) -> DataSetVerifyRes`
+- `list_all_metadata() -> list[MetaData]`
+- `check_is_referenced(target_id: str) -> list[str]`
 
-### 校验依赖链
+---
 
-```python
-# 校验所有上游依赖数据集
-is_healthy, broken_datasets = dataset.DAG.verify()
+## `MetaData`
 
-if is_healthy:
-    print("所有依赖数据集完整性校验通过！")
-else:
-    print(f"以下数据集已损坏: {broken_datasets}")
-```
+当前暴露字段（以实际类型声明为准）：
 
-### 遍历依赖图
+- `name: str`
+- `tag: str`
+- `hash: str`
+- `path: str`
+- `description_path: str`
+- `script_path: str`
+- `dependencies: list[str]`
+- `merkle_tree_path: str`
 
-```python
-# 遍历所有依赖
-for dep_metadata in dataset.DAG.iter_DAG():
-    print(f"依赖: {dep_metadata.id}")
-```
+方法：
 
-## 项目结构
+- `id() -> str`（`name@tag`）
 
-```
-dataspringflow/
-├── core/
-│   ├── dataset.py    # 数据集用户接口
-│   ├── merkle.py     # Merkle 树实现
-│   ├── metadata.py   # 元数据定义与构建
-│   ├── registry.py   # 数据集注册表
-│   └── dag.py        # 依赖关系图
-├── backend/
-│   ├── hash_io.py    # 哈希数据 I/O
-│   └── metadata_io.py # 元数据 I/O
-├── utils/
-│   ├── env.py        # 运行环境检测
-│   ├── fs.py         # 文件系统工具
-│   └── hash.py       # 哈希计算工具
-├── protocols.py      # 协议定义（接口）
-└── factory.py        # 工厂模式实现
-```
+---
 
-## 核心概念
+## `DatasetStatus`
 
-### Metadata（元数据）
+当前状态枚举：
 
-每个数据集包含以下元数据：
+- `Healthy`
+- `Broken`
+- `BrokenDeps`
+- `Unverified`
 
-| 字段 | 描述 |
-|------|------|
-| `name` | 数据集名称 |
-| `tag` | 版本标签 |
-| `path` | 数据集路径 |
-| `hash` | Merkle 树根哈希 |
-| `dependencies` | 依赖的数据集 ID 列表 |
-| `script_path` | 生成脚本路径（可选） |
+---
 
-### FileMerkleTree（文件 Merkle 树）
+## `DataSetVerifyRes`
 
-使用 MD5 哈希构建目录的 Merkle 树：
+校验结果对象：
 
-- 叶子节点：文件的内容哈希 或 空目录的路径哈希
-- 非叶子节点：子节点哈希的有序组合
+- `status: DatasetStatus`：目标数据集状态
+- `dep_status: list[DatasetStatus]`：依赖相关状态集合
 
-支持并行计算以提升大型数据集的处理性能。
+---
 
-### DAG（有向无环图）
+## `DSFDataset`
 
-数据集之间的依赖关系通过 DAG 表示，支持：
+数据集对象（由底层返回）：
 
-- 遍历所有上游依赖
-- 批量校验依赖链的完整性
+- `metadata` 属性
+- `detailed_status` 属性
+- `verify(_backend_auth, _show_diff=False)`
 
-## 后端扩展
+---
 
-DataSpringFlow 使用协议（Protocol）定义后端接口，您可以实现自定义后端：
+## DAG 组织约定
 
-```python
-from dataspringflow.protocols import MetadataLoader, HashDictLoader, AtomicWriter, RegistryFactory
+DataSpringFlow 的关键约定是：  
+**每个数据集在注册时声明其上游依赖（`dependencies`），形成有向无环图。**
 
-class MyCustomLoader(MetadataLoader):
-    def load(self, name: str, tag: str) -> Metadata:
-        # 自定义加载逻辑
-        ...
+- 节点：数据集（`name@tag`）
+- 边：`child -> parent`（或“当前数据集依赖哪些上游”）
+- 语义：下游可追溯来源，上游变动可影响下游可信度
 
-class MyCustomFactory(RegistryFactory):
-    def create_metadata_loader(self) -> MetadataLoader:
-        return MyCustomLoader()
-    # ... 实现其他方法
-```
+建议实践：
+
+1. 让 `tag` 明确表达版本语义（如 `v1`, `v2`, `2026-07`）
+2. 每次数据内容发生实质变化时创建新 tag
+3. 保持 `script_path` 可追溯，便于团队理解派生过程
+4. 在训练前执行 `verify_self` 或 `verify_deep`
+
+---
+
+## 关于哈希与一致性校验
+
+当前版本中，哈希能力用于：
+
+- 判断数据集内容是否与登记状态一致
+- 辅助定位“当前数据集是否发生变动”
+- 支撑依赖链校验中的健康判断
+
+**不用于**数据删除后自动恢复或重建编排。
+
+## 许可证
+
+请参考仓库中的 `LICENSE` 文件。
