@@ -3,16 +3,31 @@
 面向深度学习场景的数据集元数据管理工具。  
 DataSpringFlow 的核心目标是：**把数据集之间的派生关系组织为 DAG（有向无环图）**，并提供基于哈希的**一致性校验**能力，帮助你在多阶段数据处理流程中稳定管理数据集版本与依赖。
 
-> 当前版本聚焦：
->
-> - 数据集注册与查询
-> - 依赖关系（DAG）组织与追踪
-> - 数据集一致性校验（含依赖校验）
->
-> 当前版本不包含：
->
-> - 数据删除/回收站
-> - 自动恢复重建流程
+---
+
+## Dev Tips
+
+### StackBackend 与多后端配置
+
+- [ ] **StackBackend 核心定义**
+  - 单个后端只提供 SQLite 实现，一个 SQLite 后端为一个实际存储数据的后端实例。
+  - 后端实例分为两类：用户私有后端（在 `XDG_CONFIG_HOME`）和全局公有后端（在全局路径 `/etc` 或 `/var`）。
+  - 每个公有后端对应一台服务器。
+  - StackBackend 将多个后端（用户私有后端、本机公有后端、可能存在的多个远程公有后端）组合起来，形成虚拟单后端视图。
+  - 用户家目录下的那一个为该用户的唯一私有后端，其他全部为公有后端。
+
+- [ ] **多后端配置规范**
+  - 每个后端实例对应一个配置文件。
+  - 每个用户必须有一个私有后端及该私有后端的配置文件。
+  - 配置文件记录该后端的参数：
+    - **属性**：公有 or 私有，DB 文件路径。
+    - **SQLite 参数**：连接池大小、WAL 等等。
+    - **私有后端特有**：还应记录该用户所有可见的公有后端（以 IP 形式记录，本机全局后端为 `local`，远程后端则为具体 IP 地址）。
+
+- [ ] **权限模型设计**
+  - 全局初始化时创建用户组 `DSFadmin`。
+  - 普通用户对自己的私有后端有完整权限，对所有公有后端有读取权限。
+  - 若用户在 `DSFadmin` 用户组，则对本机公有后端有完整读写权限，对远程公有后端仍然只有读权限。
 
 ---
 
@@ -27,8 +42,6 @@ DataSpringFlow 把这种关系显式建模为 DAG，并围绕 DAG 提供：
 2. 依赖关系追踪
 3. 哈希一致性校验（自身 + 依赖子图）
 
----
-
 ## 当前能力概览
 
 - **数据集标识**：使用 `name@tag` 唯一标识数据集
@@ -40,8 +53,6 @@ DataSpringFlow 把这种关系显式建模为 DAG，并围绕 DAG 提供：
 - **引用检查**：检查某数据集是否被其他数据集引用
 - **Merkle 树相关信息**：用于一致性校验结果支撑（而非删除恢复）
 
----
-
 ## 安装
 
 ### 从源码安装
@@ -52,8 +63,6 @@ cd DataSpringFlow
 pip install -e .
 ```
 
----
-
 ## Python 版本与构建
 
 - Python: `>=3.9`
@@ -61,8 +70,6 @@ pip install -e .
 - Rust 扩展模块：`dataspringflow.dataspringflow_rs`
 
 项目通过 Rust + PyO3 暴露核心能力，Python 侧主要是 API 入口与类型接口。
-
----
 
 ## 快速开始
 
@@ -114,8 +121,6 @@ for m in all_meta:
     print(m.id(), m.path)
 ```
 
----
-
 ## 核心对象与接口（当前代码）
 
 ## `DSFService`
@@ -132,8 +137,6 @@ for m in all_meta:
 - `verify_self(id: str, show_diff=False) -> DataSetVerifyRes`
 - `list_all_metadata() -> list[MetaData]`
 - `check_is_referenced(target_id: str) -> list[str]`
-
----
 
 ## `MetaData`
 
@@ -152,8 +155,6 @@ for m in all_meta:
 
 - `id() -> str`（`name@tag`）
 
----
-
 ## `DatasetStatus`
 
 当前状态枚举：
@@ -163,16 +164,12 @@ for m in all_meta:
 - `BrokenDeps`
 - `Unverified`
 
----
-
 ## `DataSetVerifyRes`
 
 校验结果对象：
 
 - `status: DatasetStatus`：目标数据集状态
 - `dep_status: list[DatasetStatus]`：依赖相关状态集合
-
----
 
 ## `DSFDataset`
 
@@ -181,8 +178,6 @@ for m in all_meta:
 - `metadata` 属性
 - `detailed_status` 属性
 - `verify(_backend_auth, _show_diff=False)`
-
----
 
 ## DAG 组织约定
 
@@ -199,8 +194,6 @@ DataSpringFlow 的关键约定是：
 2. 每次数据内容发生实质变化时创建新 tag
 3. 保持 `script_path` 可追溯，便于团队理解派生过程
 4. 在训练前执行 `verify_self` 或 `verify_deep`
-
----
 
 ## 关于哈希与一致性校验
 
