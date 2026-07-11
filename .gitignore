@@ -4,6 +4,7 @@
 
 # ide and tools
 .vscode/
+.envrc
 
 # rust
 rust/target/
