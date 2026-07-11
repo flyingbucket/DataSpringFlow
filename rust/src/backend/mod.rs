@@ -1,4 +1,4 @@
-use crate::config::{AppConfig, BackendConfig};
+use crate::config::AppConfig;
 use crate::core::MetaData;
 
 use std::io;
@@ -7,7 +7,14 @@ use thiserror::Error;
 mod sqlite_backend;
 pub use sqlite_backend::{SqliteBackend, SqliteConfig};
 
-mod stacked_backend;
+mod remote_backend;
+pub use remote_backend::{RemoteBackend, RemoteConfig};
+
+mod router;
+pub use router::{
+    BackendAddr, GlobalBackend, GlobalBackendAddr, ScopedId, ScopedMetaData, StackedBackend,
+    StackedBackendConfig,
+};
 
 pub trait DatasetBackend {
     /// Retrieves the corresponding metadata by the dataset ID.
@@ -47,11 +54,7 @@ pub enum BackendError {
 }
 pub type BackendResult<T> = Result<T, BackendError>;
 
-pub fn build_backend_auto() -> io::Result<DynBackend> {
+pub fn build_backend_auto() -> io::Result<StackedBackend> {
     let cfg = AppConfig::load()?;
-    match &cfg.backend {
-        BackendConfig::Sqlite(sqlite_cfg) => Ok(Box::new(SqliteBackend::new(sqlite_cfg.clone())?)),
-        // BackendConfig::Yaml(yaml_cfg) => ...
-        // BackendConfig::Remote(remote_cfg) => ...
-    }
+    StackedBackend::new(cfg.backend)
 }
