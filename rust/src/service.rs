@@ -3,13 +3,13 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 
-use crate::backend::{BackendRef, DynBackend};
-use crate::core::{DSFDataSet, DataSetStatus, DataSetVerifyRes, MetaData};
+use crate::backend::{BackendAddr, ScopedId, ScopedMetaData, StackedBackend};
+use crate::core::{DSFDataSet, DataSetStatus, DataSetVerifyRes, MetaData, MetaDataError};
 use crate::dag::{DatasetGraph, DatasetGraphError};
 use crate::utils::*;
 
 pub struct DSFService {
-    backend: DynBackend,
+    backend: StackedBackend,
 }
 
 #[derive(Debug, Clone)]
@@ -26,23 +26,27 @@ pub struct RegisterOptions {
 }
 
 impl DSFService {
-    pub fn new(backend: DynBackend) -> Self {
+    pub fn new(backend: StackedBackend) -> Self {
         Self { backend }
     }
 
-    #[inline]
-    fn backend(&self) -> BackendRef<'_> {
-        self.backend.as_ref()
-    }
+    // #[inline]
+    // fn backend(&self) -> BackendRef<'_> {
+    //     self.backend.as_ref()
+    // }
 
     /// query metadata according on id
-    pub fn query_meta(&self, id: &str) -> io::Result<MetaData> {
+    pub fn query_meta(&self, id: &str) -> io::Result<Vec<ScopedMetaData>> {
         validate_dataset_id(id).map_err(to_io_invalid_input)?;
-        self.backend().get_metadata(id)
+        self.backend.get_metadata(id)
     }
 
     /// register new dataset
-    pub fn register(&self, opts: RegisterOptions) -> Result<()> {
+    pub fn register(
+        &self,
+        opts: RegisterOptions,
+        target_backend: Option<&BackendAddr>,
+    ) -> Result<()> {
         validate_name_tag(&opts.name, &opts.tag)?;
         ensure_exists(&opts.path, "--path")?;
         ensure_exists(&opts.script_path, "--script-path")?;
@@ -53,25 +57,26 @@ impl DSFService {
         // 依赖必须存在
         for dep_id in &opts.dependencies {
             validate_dataset_id(dep_id)?;
-            if self.backend().get_metadata(dep_id).is_err() {
+            if self.backend.get_metadata(dep_id).is_err() {
                 bail!("Dependency dataset does not exist: {}", dep_id);
             }
         }
 
         // DAG 查环
+        let backend_handel = self.backend.get_backend_by_addr(target_backend)?;
         let graph = DatasetGraph::from_root_with_deps(
             &opts.name,
             &opts.tag,
             &opts.dependencies,
-            self.backend(),
+            backend_handel.as_ref(),
         )?;
         graph.check_cycle()?;
 
         // 依赖健康检查
         let mut broken = Vec::new();
         for dep_id in &opts.dependencies {
-            let mut ds = DSFDataSet::load_from_id(dep_id, self.backend())?;
-            let res = ds.verify(self.backend(), false)?;
+            let mut ds = DSFDataSet::load_from_id(dep_id, backend_handel.as_ref())?;
+            let res = ds.verify(backend_handel.as_ref(), false)?;
             if res.status != DataSetStatus::Healthy {
                 broken.push(dep_id.clone());
             }
@@ -87,8 +92,8 @@ impl DSFService {
             }
 
             for dep_id in &broken {
-                let mut ds = DSFDataSet::load_from_id(dep_id, self.backend())?;
-                ds.refresh_and_commit(self.backend())?;
+                let mut ds = DSFDataSet::load_from_id(dep_id, backend_handel.as_ref())?;
+                ds.refresh_and_commit(backend_handel.as_ref())?;
             }
         }
 
@@ -104,25 +109,32 @@ impl DSFService {
             opts.dependencies,
             merkle_tree_path,
         )?;
-        self.backend().save_metadata(&meta)?;
+        // backend_handel.as_ref().save_metadata(&meta)?;
+        self.backend.save_metadata(&meta, target_backend)?;
         Ok(())
     }
 
     /// update hash recalculate hash and save merkle
-    pub fn update_merkle(&self, id: &str) -> Result<()> {
+    pub fn update_merkle(&self, id: &str, target_backend: Option<&BackendAddr>) -> Result<()> {
         validate_dataset_id(id)?;
-        let mut ds = DSFDataSet::load_from_id(id, self.backend())?;
-        ds.refresh_and_commit(self.backend())?;
+        let backend_handel = self.backend.get_backend_by_addr(target_backend)?;
+        let mut ds = DSFDataSet::load_from_id(id, backend_handel.as_ref())?;
+        ds.refresh_and_commit(backend_handel.as_ref())?;
         Ok(())
     }
 
     /// delete: remove a dataset from global registration, data on disk will NOT be deleted
-    pub fn delete_metadata(&self, id: &str, force: bool) -> Result<()> {
+    pub fn delete_metadata(
+        &self,
+        id: &str,
+        force: bool,
+        target_backend: Option<&BackendAddr>,
+    ) -> Result<()> {
         validate_dataset_id(id)?;
-
+        let backend_handel = self.backend.get_backend_by_addr(target_backend)?;
+        let backend_ref = backend_handel.as_ref();
         if !force {
-            let referrers = self
-                .backend()
+            let referrers = backend_ref
                 .check_is_referenced(id)
                 .context("reverse dependency query failed")?;
             if !referrers.is_empty() {
@@ -134,12 +146,11 @@ impl DSFService {
         }
 
         // 存在性检查
-        let _ = self
-            .backend()
+        let _ = backend_ref
             .get_metadata(id)
             .context(format!("Dataset metadata not found for ID: {}", id))?;
 
-        self.backend()
+        backend_ref
             .delete_metadata(id)
             .context("delete_metadata failed")?;
         Ok(())
@@ -150,27 +161,37 @@ impl DSFService {
         &self,
         id: &str,
         show_diff: bool,
+        target_backend: Option<&BackendAddr>,
     ) -> Result<DataSetVerifyRes, DatasetGraphError> {
-        let mut ds = DSFDataSet::load_from_id(id, self.backend())?;
-        ds.verify(self.backend(), show_diff)
+        let backend_handel = self.backend.get_backend_by_addr(target_backend)?;
+        let backend_ref = backend_handel.as_ref();
+        let mut ds = DSFDataSet::load_from_id(id, backend_ref)?;
+        ds.verify(backend_ref, show_diff)
     }
 
     /// verify self only
-    pub fn verify_self(&self, id: &str, show_diff: bool) -> Result<DataSetVerifyRes> {
+    pub fn verify_self(
+        &self,
+        id: &str,
+        show_diff: bool,
+        target_backend: Option<&BackendAddr>,
+    ) -> Result<DataSetVerifyRes> {
         validate_dataset_id(id)?;
-        let mut ds = DSFDataSet::load_from_id(id, self.backend())?;
+        let backend_handel = self.backend.get_backend_by_addr(target_backend)?;
+        let backend_ref = backend_handel.as_ref();
+        let mut ds = DSFDataSet::load_from_id(id, backend_ref)?;
         Ok(ds.verify_single(show_diff, &[])?)
     }
 
     /// list all metadata registered on this machine
     /// wrap and expose from backend
-    pub fn list_all_metadata(&self) -> io::Result<Vec<MetaData>> {
+    pub fn list_all_metadata(&self) -> io::Result<Vec<ScopedMetaData>> {
         self.backend.list_all_metadata()
     }
 
     /// list all datasets that depend on <target_id>
     /// wrap and expose from backend
-    pub fn check_is_referenced(&self, target_id: &str) -> io::Result<Vec<String>> {
+    pub fn check_is_referenced(&self, target_id: &str) -> Result<Vec<ScopedId>, MetaDataError> {
         self.backend.check_is_referenced(target_id)
     }
 }
