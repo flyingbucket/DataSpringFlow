@@ -9,6 +9,7 @@ use std::fs;
 use std::io;
 use std::io::Error;
 use std::io::ErrorKind;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -43,10 +44,11 @@ fn default_foreign_keys() -> bool {
     true
 }
 
-impl Default for SqliteConfig {
-    fn default() -> Self {
+impl SqliteConfig {
+    // 初始化时强制要求传入必填字段
+    pub fn new(db_path: PathBuf) -> Self {
         Self {
-            db_path: PathBuf::from("./datasets.db"),
+            db_path,
             pool_size: default_pool_size(),
             busy_timeout_ms: default_busy_timeout_ms(),
             wal: default_wal(),
@@ -54,8 +56,30 @@ impl Default for SqliteConfig {
             foreign_keys: default_foreign_keys(),
         }
     }
-}
 
+    // 可选字段的流式链式设置方法
+    pub fn pool_size(mut self, size: u32) -> Self {
+        self.pool_size = size;
+        self
+    }
+
+    pub fn busy_timeout(mut self, ms: u64) -> Self {
+        self.busy_timeout_ms = ms;
+        self
+    }
+
+    // 最终装装配出不可变的真正配置
+    pub fn build(self) -> SqliteConfig {
+        SqliteConfig {
+            db_path: self.db_path,
+            pool_size: self.pool_size,
+            busy_timeout_ms: self.busy_timeout_ms,
+            wal: self.wal,
+            synchronous: self.synchronous,
+            foreign_keys: self.foreign_keys,
+        }
+    }
+}
 pub struct SqliteBackend {
     cfg: SqliteConfig,
     pool: Pool<SqliteConnectionManager>,
@@ -75,7 +99,12 @@ impl SqliteBackend {
             .build(manager)
             .map_err(|e| Error::other(format!("build sqlite pool failed: {e}")))?;
 
-        let backend = Self { cfg, pool };
+        let backend = Self {
+            cfg: cfg.clone(),
+            pool,
+        };
+        let perms = fs::Permissions::from_mode(0o660);
+        fs::set_permissions(&cfg.db_path, perms)?;
         backend.init()?;
         Ok(backend)
     }
