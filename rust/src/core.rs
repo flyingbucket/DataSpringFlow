@@ -6,7 +6,7 @@ use crate::{
     backend::BackendRef,
     dag::{DatasetGraph, DatasetGraphError},
     merkle::{FileMerkleTree, HashRes, MerkleTreeSnapshot},
-    utils::hashres_to_hex,
+    utils::{get_username, hashres_to_hex},
 };
 
 use std::fmt;
@@ -18,6 +18,12 @@ pub enum MetaDataError {
     OwnerResolveFailed(String),
     InvalidNickname(String),
     Io(io::Error),
+}
+
+impl From<std::io::Error> for MetaDataError {
+    fn from(err: std::io::Error) -> Self {
+        MetaDataError::Io(err)
+    }
 }
 
 impl fmt::Display for MetaDataError {
@@ -33,12 +39,6 @@ impl fmt::Display for MetaDataError {
 }
 
 impl std::error::Error for MetaDataError {}
-
-impl From<io::Error> for MetaDataError {
-    fn from(value: io::Error) -> Self {
-        MetaDataError::Io(value)
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct MetaData {
@@ -121,9 +121,7 @@ impl MetaData {
     }
 
     fn merge_owner_name(nickname: Option<String>) -> Result<String, MetaDataError> {
-        let linux_user = whoami::username().map_err(|e| {
-            MetaDataError::OwnerResolveFailed(format!("OS username unavailable: {e}"))
-        })?;
+        let linux_user = get_username()?;
 
         let linux_user = linux_user.trim();
         if linux_user.is_empty() {

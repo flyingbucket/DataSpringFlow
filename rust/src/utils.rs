@@ -1,3 +1,5 @@
+use crate::core::DataSetStatus;
+use crate::core::MetaDataError;
 use crate::merkle::HashRes;
 use std::fs;
 use std::io;
@@ -6,8 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use colored::*;
 use directories::ProjectDirs;
-
-use crate::core::DataSetStatus;
+use whoami;
 
 pub fn hashres_to_hex(bytes: HashRes) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
@@ -25,9 +26,9 @@ pub fn is_root() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
 
-#[cfg(not(unix))]
-pub fn is_root() -> bool {
-    false
+pub(crate) fn get_username() -> Result<String, MetaDataError> {
+    whoami::username()
+        .map_err(|e| MetaDataError::OwnerResolveFailed(format!("OS username unavailable: {e}")))
 }
 
 pub(crate) fn to_io_invalid_input(e: anyhow::Error) -> io::Error {
