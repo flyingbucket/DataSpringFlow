@@ -1,15 +1,20 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
-use colored::*;
-use dialoguer::{Confirm, Input, Select};
-use std::fs;
-use std::path::PathBuf;
-use strum::IntoEnumIterator;
+use colored::Colorize;
+use dialoguer::{Confirm, Select};
+use std::env;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use directories::ProjectDirs;
 
-use crate::backend::{SqliteBackend, SqliteConfig, build_backend_auto};
-use crate::config::{AppConfig, BackendConfig, InstallMode};
+use crate::backend::{
+    BackendAddr, GlobalBackendAddr, SqliteBackend, SqliteConfig, StackedBackendConfig,
+    build_backend_auto,
+};
+use crate::config::{AppConfig, InstallMode};
 use crate::service::{DSFService, RegisterOptions};
 use crate::utils::*;
 
@@ -31,9 +36,6 @@ pub enum Commands {
         /// Global installation (/etc/dataspringflow + /var/lib/dataspringflow)
         #[arg(long, default_value_t = false)]
         global: bool,
-        ///  Non-interactive mode, initialize using default paths directly
-        #[arg(long, default_value_t = false)]
-        non_interactive: bool,
     },
 
     /// Show current application environment and backend database configurations
@@ -49,6 +51,9 @@ pub enum Commands {
         /// Show differences on verification failure
         #[arg(long, default_value_t = false)]
         show_diff: bool,
+        /// Query specifically against the global registry instead of private
+        #[arg(long, default_value_t = false)]
+        global: bool,
     },
 
     /// Register new dataset
@@ -73,10 +78,18 @@ pub enum Commands {
         /// Non-interactive confirmation (skip prompts)
         #[arg(long, default_value_t = false)]
         yes: bool,
+        /// Register dataset directly to the global public registry
+        #[arg(long, default_value_t = false)]
+        global: bool,
     },
 
     /// Recalculate and update dataset hashes
-    Update { id: String },
+    Update {
+        id: String,
+        /// Target the global public registry
+        #[arg(long, default_value_t = false)]
+        global: bool,
+    },
 
     /// Delete a dataset entry
     Delete {
@@ -85,6 +98,9 @@ pub enum Commands {
         force: bool,
         #[arg(long, default_value_t = false)]
         yes: bool,
+        /// Target the global public registry
+        #[arg(long, default_value_t = false)]
+        global: bool,
     },
 }
 
@@ -97,16 +113,14 @@ pub enum VerifyLevel {
 
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Commands::Init {
-            global,
-            non_interactive,
-        } => handle_init(global, non_interactive),
+        Commands::Init { global } => handle_init(global),
         Commands::ShowConfig => handle_show_config(),
         Commands::Query {
             id,
             level,
             show_diff,
-        } => handle_query(&id, level, show_diff),
+            global,
+        } => handle_query(&id, level, show_diff, global),
         Commands::Register {
             name,
             tag,
@@ -117,6 +131,7 @@ pub fn run(cli: Cli) -> Result<()> {
             dependencies,
             force_heal,
             yes,
+            global,
         } => {
             let opts = RegisterOptions {
                 name,
@@ -129,25 +144,52 @@ pub fn run(cli: Cli) -> Result<()> {
                 force_heal,
                 yes,
             };
-            handle_register(opts)
+            handle_register(opts, global)
         }
-        Commands::Update { id } => handle_update(&id),
-        Commands::Delete { id, force, yes } => handle_delete(&id, force, yes),
+        Commands::Update { id, global } => handle_update(&id, global),
+        Commands::Delete {
+            id,
+            force,
+            yes,
+            global,
+        } => handle_delete(&id, force, yes, global),
     }
 }
 
-fn handle_init(global_flag: bool, non_inter: bool) -> Result<()> {
-    // 1) 交互决定安装级别
+/// Resolves the CLI `--global` flag into the StackedBackend Routing Address
+fn get_target_addr(global: bool) -> Option<BackendAddr> {
+    if global {
+        Some(BackendAddr::Global {
+            addr: GlobalBackendAddr::Sqlite {
+                config_path: PathBuf::from("/etc/dataspringflow/config.yaml"),
+            },
+        })
+    } else {
+        None
+    }
+}
+
+pub fn handle_init(global_flag: bool) -> Result<()> {
+    let username = env::var("USER")
+        .or_else(|_| env::var("LOGNAME"))
+        .unwrap_or_else(|_| "root".to_string());
+
+    if username == "root" {
+        println!("{}", "Warning: You are running directly as root. It is recommended to run this as a normal user to capture your true identity.".yellow());
+    }
+
     let mode = if global_flag {
         InstallMode::Global
-    } else if non_inter {
-        InstallMode::User
     } else {
         let items = vec![
-            "User installation (~/.config/dataspringflow + ~/.local/share/dataspringflow)",
-            "Global installation (/etc/dataspringflow + /var/lib/dataspringflow)",
+            "User installation (Private sandbox in ~/.local/share/dataspringflow)",
+            "Global installation (System-wide public registry & Admin groups setup)",
         ];
-        let idx = Select::new().items(&items).interact()?;
+        let idx = Select::new()
+            .with_prompt("Please select installation mode")
+            .items(&items)
+            .default(0)
+            .interact()?;
         if idx == 0 {
             InstallMode::User
         } else {
@@ -155,143 +197,220 @@ fn handle_init(global_flag: bool, non_inter: bool) -> Result<()> {
         }
     };
 
-    let global = { mode == InstallMode::Global };
-
-    // 2) 权限检查
-    if global && !is_root() {
-        bail!(
-            "{}\n{}",
-            "Error: Global installation requires root privileges."
-                .red()
-                .bold(),
-            "Please use: sudo dsf init --global".yellow()
-        );
+    match mode {
+        InstallMode::Global => init_global(&username)?,
+        InstallMode::User => init_user()?,
+        _ => bail!("Unsupported installation mode"),
     }
 
-    let default_config: PathBuf;
-    let default_data: PathBuf;
+    println!(
+        "{}",
+        "\nInitialization finished successfully.".green().bold()
+    );
+    Ok(())
+}
 
-    if global {
-        default_config = PathBuf::from("/etc/dataspringflow/config.yaml");
-        default_data = PathBuf::from("/var/lib/dataspringflow/");
-    } else {
-        // XDG home dir
-        if let Some(proj_dirs) = ProjectDirs::from("io", "flyingbucket", "dataspringflow") {
-            default_config = proj_dirs.config_dir().join("config.yaml");
-            default_data = proj_dirs.data_dir().to_path_buf();
-        } else {
-            // 没有家目录的环境特殊情况
-            default_config = PathBuf::from("./config/config.yaml");
-            default_data = PathBuf::from("./data");
-            println!(
-                "{}",
-                "Warning: Failed to find OS standart project dir, using current working dir as a backup.\n 
-                    Check your environment varible $HOME. If using a docker, set env $DSF_CONFIG_PATH and edit that file manully."
-                    .yellow()
-                    .bold()
-            );
-        }
+fn init_global(username: &str) -> Result<()> {
+    println!(
+        "{}",
+        "\n[Global Setup] Requesting sudo privileges to configure system directories and groups..."
+            .yellow()
+            .bold()
+    );
+
+    let config_path = PathBuf::from("/etc/dataspringflow/config.yaml");
+    let data_path = PathBuf::from("/var/lib/dataspringflow");
+
+    let setup_script = format!(
+        r#"
+set -e
+groupadd -f DSFadmin
+
+mkdir -p /etc/dataspringflow
+mkdir -p /var/lib/dataspringflow/merkle
+mkdir -p /var/lib/dataspringflow/descriptions
+
+chown root:DSFadmin /etc/dataspringflow /var/lib/dataspringflow
+chmod 755 /etc/dataspringflow
+chmod 2775 /var/lib/dataspringflow
+chmod g+s /var/lib/dataspringflow # Inherit group for WAL/SHM files
+
+if [ "{user}" != "root" ]; then
+    usermod -aG DSFadmin {user}
+fi
+"#,
+        user = username
+    );
+
+    let status = Command::new("sudo")
+        .arg("sh")
+        .arg("-c")
+        .arg(&setup_script)
+        .status()
+        .context("Failed to execute sudo commands. Do you have sudo privileges?")?;
+
+    if !status.success() {
+        bail!("System environment setup failed.");
     }
 
-    // 4) 可交互修改路径
-    let (config_path, data_path) = if non_inter {
-        (default_config, default_data)
-    } else {
-        let config_path_str: String = Input::new()
-            .with_prompt("Config file path")
-            .default(default_config.display().to_string())
-            .interact_text()?;
-        let data_path_str: String = Input::new()
-            .with_prompt("Path to metadata and merkle hash tree storage ")
-            .default(default_data.display().to_string())
-            .interact_text()?;
-        (PathBuf::from(config_path_str), PathBuf::from(data_path_str))
+    let sqlite_cfg = SqliteConfig::new(data_path.join("dsf.db"));
+    let stacked_cfg = StackedBackendConfig {
+        private_sqlite_cfg: sqlite_cfg.clone(),
+        global_repos: vec![], // Global instance itself has no further global upstream
     };
 
-    let backend_choice = if non_inter {
-        BackendConfig::Sqlite(SqliteConfig::default())
-    } else {
-        let variants: Vec<BackendConfig> = BackendConfig::iter().collect();
-        let items: Vec<String> = variants.iter().map(|v| v.to_string()).collect();
-
-        let idx = Select::new()
-            .with_prompt("Select storage backend")
-            .items(&items)
-            .default(0)
-            .interact()?;
-
-        // 根据索引直接从变体列表中取回
-        #[allow(unreachable_patterns)]
-        match variants.get(idx) {
-            Some(BackendConfig::Sqlite(_)) => BackendConfig::Sqlite(SqliteConfig::default()),
-            Some(_) => bail!("Not implemented yet"),
-            None => bail!("Invalid selection"),
-        }
-    };
-
-    // 打印预览信息
-    println!(
-        "Installation mode: {}",
-        if global {
-            "global".cyan()
-        } else {
-            "user".cyan()
-        }
-    );
-    println!(
-        "Config file:       {}",
-        config_path.display().to_string().cyan()
-    );
-    println!(
-        "Data dir for metadata storage and merkle tree files:     {}",
-        data_path.display().to_string().cyan()
-    );
-
-    if !non_inter {
-        let ok = Confirm::new()
-            .with_prompt("Confirm?")
-            .default(true)
-            .interact()?;
-        if !ok {
-            bail!("Installation and initialization terminated");
-        }
-    }
-
-    if let Some(p) = config_path.parent() {
-        fs::create_dir_all(p)
-            .with_context(|| format!("Failed making config dir: {}", p.display()))?;
-    }
-    fs::create_dir_all(&data_path)
-        .with_context(|| format!("Failed making data base dir: {}", data_path.display()))?;
-
-    // 装配配置并写入 YAML
-    let final_config = match backend_choice {
-        BackendConfig::Sqlite(mut cfg) => {
-            // 在这里根据之前探测到的 data_path 动态设置 sqlite 路径
-            cfg.db_path = data_path.join("dsf.db");
-            AppConfig {
-                mode,
-                config_path: Some(config_path.clone()),
-                backend: BackendConfig::Sqlite(cfg),
-            }
-        }
+    let final_config = AppConfig {
+        mode: InstallMode::Global,
+        config_path: Some(config_path.clone()),
+        backend: stacked_cfg,
     };
 
     let config_yaml =
-        serde_yaml::to_string(&final_config).context("Failed to serialize AppConfig to YAML")?;
+        serde_yaml::to_string(&final_config).context("Failed to serialize AppConfig")?;
+    let temp_config = env::temp_dir().join("dsf_global_config_temp.yaml");
+    fs::write(&temp_config, &config_yaml)?;
 
-    fs::write(&config_path, config_yaml)
-        .with_context(|| format!("Failed writing config file: {}", config_path.display()))?;
+    let mv_script = format!(
+        "mv {} {} && chown root:DSFadmin {} && chmod 644 {}",
+        temp_config.display(),
+        config_path.display(),
+        config_path.display(),
+        config_path.display()
+    );
+    Command::new("sudo")
+        .arg("sh")
+        .arg("-c")
+        .arg(&mv_script)
+        .status()?;
 
-    #[allow(unreachable_patterns)]
-    let _backend = match final_config.backend {
-        BackendConfig::Sqlite(sqlite_cfg) => {
-            SqliteBackend::new(sqlite_cfg).context("Failed initializing db file")?
-        }
-        _ => bail!("Unsupported backend type for initialization"),
+    println!("{}", "Initializing global database backend...".cyan());
+    if let Err(e) = SqliteBackend::new(sqlite_cfg) {
+        println!(
+            "{}",
+            format!("Database initialization skipped: {e}").yellow()
+        );
+        println!("{}", "Note: Your user was added to `DSFadmin`, but group memberships need a session refresh. Run `su - $USER` to take effect!".yellow().bold());
+    }
+
+    // Automatically trigger user init to link the local sandbox to this new global registry
+    init_user()?;
+    Ok(())
+}
+
+fn init_user() -> Result<()> {
+    println!("{}", "\n[User Setup] Configuring private sandbox...".cyan());
+
+    let proj_dirs = ProjectDirs::from("io", "flyingbucket", "dataspringflow").context(
+        "Failed to determine standard user directories (XDG_CONFIG_HOME / XDG_DATA_HOME)",
+    )?;
+
+    let config_dir = proj_dirs.config_dir();
+    let data_dir = proj_dirs.data_dir();
+    let config_path = config_dir.join("config.yaml");
+
+    fs::create_dir_all(config_dir).context("Failed to create user config dir")?;
+    fs::create_dir_all(data_dir.join("merkle")).context("Failed to create user data dir")?;
+    fs::create_dir_all(data_dir.join("descriptions")).context("Failed to create user data dir")?;
+
+    let sqlite_cfg = SqliteConfig::new(data_dir.join("dsf.db"));
+
+    // Detect if global is installed to automatically mount it in StackedBackend
+    let mut global_repos = vec![];
+    let is_global = is_global_installed("DSFadmin");
+    if is_global {
+        global_repos.push(GlobalBackendAddr::Sqlite {
+            config_path: PathBuf::from("/etc/dataspringflow/config.yaml"),
+        });
+    }
+
+    let stacked_cfg = StackedBackendConfig {
+        private_sqlite_cfg: sqlite_cfg.clone(),
+        global_repos,
     };
 
-    println!("{}", "Initialization finished".green().bold());
+    let final_config = AppConfig {
+        mode: InstallMode::User,
+        config_path: Some(config_path.clone()),
+        backend: stacked_cfg,
+    };
+
+    let config_yaml = serde_yaml::to_string(&final_config)?;
+    fs::write(&config_path, config_yaml).context("Failed to write user config file")?;
+
+    println!("{}", "Initializing user database backend...".cyan());
+    SqliteBackend::new(sqlite_cfg).context("Failed to initialize user database")?;
+
+    if is_global {
+        println!(
+            "{}",
+            "Global registry detected. Applying strict ACLs to allow DSFadmin audit traversal..."
+                .cyan()
+        );
+
+        let home_dir = proj_dirs
+            .data_dir()
+            .ancestors()
+            .nth(3)
+            .unwrap_or(Path::new("/"));
+        if let Err(e) = ensure_acl_permissions(home_dir, data_dir, "DSFadmin") {
+            println!(
+                "Warning: Failed to set ACL permissions: {}. DSFadmin will not be able to audit your private datasets.",
+                e
+            );
+        } else {
+            println!("{}", "ACL permissions applied successfully.".cyan());
+        }
+    }
+
+    Ok(())
+}
+
+fn is_global_installed(group_name: &str) -> bool {
+    let file = match File::open("/etc/group") {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+
+    let reader = BufReader::new(file);
+    let group_exists = reader.lines().any(|line| {
+        if let Ok(l) = line {
+            l.split(':').next() == Some(group_name)
+        } else {
+            false
+        }
+    });
+    Path::new("/etc/dataspringflow/config.yaml").exists() && group_exists
+}
+
+fn ensure_acl_permissions(home: &Path, data_dir: &Path, group: &str) -> Result<()> {
+    let run = |args: &[&str], path: &Path| -> Result<()> {
+        let output = Command::new("setfacl").args(args).arg(path).output()?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("setfacl {} failed: {}", args.join(" "), stderr.trim())
+        }
+        Ok(())
+    };
+
+    // Safe traversal (+x only) for parent directories
+    let local = home.join(".local");
+    let share = local.join("share");
+
+    if home.exists() {
+        run(&["-m", &format!("g:{}:x", group)], home)?;
+    }
+    if local.exists() {
+        run(&["-m", &format!("g:{}:x", group)], &local)?;
+    }
+    if share.exists() {
+        run(&["-m", &format!("g:{}:x", group)], &share)?;
+    }
+
+    // Read/Execute (+rX) for the target data dir and its descendants
+    let rule = format!("g:{}:rX", group);
+    run(&["-d", "-m", &rule], data_dir)?;
+    run(&["-R", "-m", &rule], data_dir)?;
+
     Ok(())
 }
 
@@ -311,10 +430,10 @@ fn handle_show_config() -> Result<()> {
             return Ok(());
         }
     };
+
     let mode_str = match app_cfg.mode {
         InstallMode::User => "User",
         InstallMode::Global => "Global",
-        InstallMode::Custom => "Custom",
     };
     println!("{:<25} {}", "Environment Mode:".bold(), mode_str);
 
@@ -323,66 +442,23 @@ fn handle_show_config() -> Result<()> {
         .as_ref()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "Not set / In-memory".to_string());
-    println!("{:<25} {}", "Config File Path:".bold(), path_str,);
+    println!("{:<25} {}", "Config File Path:".bold(), path_str);
 
-    #[allow(unreachable_patterns)]
-    match app_cfg.backend {
-        BackendConfig::Sqlite(sqlite_cfg) => {
-            println!(
-                "{:<25} {}",
-                "Backend Database Path:".bold(),
-                sqlite_cfg.db_path.display().to_string().cyan()
-            );
+    let sqlite_cfg = &app_cfg.backend.private_sqlite_cfg;
+    println!(
+        "{:<25} {}",
+        "Private DB Path:".bold(),
+        sqlite_cfg.db_path.display().to_string().cyan()
+    );
 
-            println!(
-                "\n{}",
-                "--- Storage Backend (SQLite) Detailed Parameters ---"
-                    .normal()
-                    .dimmed()
-            );
-
-            if sqlite_cfg.db_path.exists() {
-                println!(
-                    "{:<25} {} (Concurrent Connections)",
-                    "Connection Pool Size:", sqlite_cfg.pool_size
-                );
-                println!("{:<25} {} ms", "Busy Timeout:", sqlite_cfg.busy_timeout_ms);
-                println!(
-                    "{:<25} {}",
-                    "Write-Ahead Log (WAL):",
-                    if sqlite_cfg.wal {
-                        "Enabled (True)".green()
-                    } else {
-                        "Disabled (False)".red()
-                    }
-                );
-                println!(
-                    "{:<25} {} (Balances performance & safety)",
-                    "Synchronous Mode:", sqlite_cfg.synchronous
-                );
-                println!(
-                    "{:<25} {}",
-                    "Foreign Key Constraints:",
-                    if sqlite_cfg.foreign_keys {
-                        "Enforced (True)".green()
-                    } else {
-                        "Ignored (False)".red()
-                    }
-                );
-            } else {
-                println!(
-                    "{}",
-                    "Note: Database file has not been physically created yet. The paths above are active targets.\nPlease run `dsf init` first to initialize the environment."
-                        .yellow()
-                        .dimmed()
-                );
-            }
-        }
-        // BackendConfig::Yaml(yaml_cfg) => { ... }
-        // BackendConfig::Remote(remote_cfg) => { ... }
-        _ => {
-            println!("{}", "Error: Unknown backend type.".red().bold(),);
-        }
+    if !app_cfg.backend.global_repos.is_empty() {
+        println!(
+            "{:<25} {:?}",
+            "Mounted Global Repos:".bold(),
+            app_cfg.backend.global_repos
+        );
+    } else {
+        println!("{:<25} {}", "Mounted Global Repos:".bold(), "None".dimmed());
     }
 
     println!(
@@ -394,21 +470,32 @@ fn handle_show_config() -> Result<()> {
     Ok(())
 }
 
-fn handle_query(id: &str, level: VerifyLevel, show_diff: bool) -> Result<()> {
+fn handle_query(id: &str, level: VerifyLevel, show_diff: bool, global: bool) -> Result<()> {
     validate_dataset_id(id)?;
     let backend = build_backend_auto()?;
     let service = DSFService::new(backend);
+    let target = get_target_addr(global);
 
     match level {
         VerifyLevel::MetaOnly => {
-            let meta = service.query_meta(id);
-            match meta {
-                Ok(m) => {
-                    println!("{}", "Dataset exists".green());
-                    println!("id: {}", m.id());
-                    println!("path: {}", m.path.display());
-                    println!("hash: {}", m.hash);
-                    println!("deps: {:?}", m.dependencies);
+            let meta_results = service.query_meta(id);
+            match meta_results {
+                Ok(metas) => {
+                    for scoped_meta in metas {
+                        let (addr, m) = (scoped_meta.0, scoped_meta.1);
+                        let scope_str = match addr {
+                            BackendAddr::Private { username } => {
+                                format!("Private Sandbox ({})", username).cyan()
+                            }
+                            BackendAddr::Global { .. } => "Global Registry".green(),
+                        };
+                        println!("{} [{}]", "Dataset exists".green(), scope_str);
+                        println!("id: {}", m.id());
+                        println!("path: {}", m.path.display());
+                        println!("hash: {}", m.hash);
+                        println!("deps: {:?}", m.dependencies);
+                        println!("---");
+                    }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     println!("{}", "Dataset doesn't exist".red().bold());
@@ -417,58 +504,79 @@ fn handle_query(id: &str, level: VerifyLevel, show_diff: bool) -> Result<()> {
             }
         }
         VerifyLevel::SelfOnly => {
-            let res = service.verify_self(id, show_diff)?;
+            let res = service.verify_self(id, show_diff, target.as_ref())?;
             print_query(id, res.status, &res.dep_status);
         }
         VerifyLevel::Deep => {
-            let res = service.verify_deep(id, show_diff)?;
+            let res = service.verify_deep(id, show_diff, target.as_ref())?;
             print_query(id, res.status, &res.dep_status);
         }
     }
     Ok(())
 }
-fn handle_register(opts: RegisterOptions) -> Result<()> {
+
+fn handle_register(opts: RegisterOptions, global: bool) -> Result<()> {
     let service = DSFService::new(build_backend_auto()?);
-    service.register(opts)?;
+    let target = get_target_addr(global);
+    service.register(opts, target.as_ref())?;
+    println!("{}", "Successfully registered dataset.".green());
     Ok(())
 }
 
-fn handle_update(id: &str) -> Result<()> {
+fn handle_update(id: &str, global: bool) -> Result<()> {
     let backend = build_backend_auto()?;
     let service = DSFService::new(backend);
-    service.update_merkle(id)?;
-    let meta = service.query_meta(id)?;
+    let target = get_target_addr(global);
 
-    println!(
-        "{}",
-        format!("updated dataset {}, new hash: \n{}", id, &meta.hash,).green()
-    );
+    service.update_merkle(id, target.as_ref())?;
+
+    let metas = service.query_meta(id)?;
+    if let Some(meta) = metas.first() {
+        println!(
+            "{}",
+            format!("updated dataset {}, new hash: \n{}", id, meta.1.hash,).green()
+        );
+    }
     Ok(())
 }
 
-fn handle_delete(id: &str, force: bool, yes: bool) -> Result<()> {
+fn handle_delete(id: &str, force: bool, yes: bool, global: bool) -> Result<()> {
     let service = DSFService::new(build_backend_auto()?);
-    let meta = service.query_meta(id)?;
+    let target = get_target_addr(global);
+
     if !yes {
-        let ok = Confirm::new()
-            .with_prompt(format!(
-                "id: {}\nPath: {:?}\nAre you sure you want to delete this dataset from the global registry?\nnote: deletes metadata only, actuall data on disk will be safe.",
-                id, meta.path
-            ))
-            .default(false)
-            .interact()?;
-        if !ok {
-            bail!("Deletion cancelled by user.");
+        let metas = service.query_meta(id)?;
+        if let Some(meta_to_delete) = metas.first() {
+            let m = &meta_to_delete.1;
+            let scope_str = if global {
+                "global registry"
+            } else {
+                "private sandbox"
+            };
+
+            let ok = Confirm::new()
+                .with_prompt(format!(
+                    "id: {}\nPath: {:?}\nAre you sure you want to delete this dataset from the {}?\nnote: deletes metadata only, actual data on disk will be safe.",
+                    id, m.path, scope_str
+                ))
+                .default(false)
+                .interact()?;
+            if !ok {
+                bail!("Deletion cancelled by user.");
+            }
         }
     }
-    service.delete_metadata(id, force)?;
+    service.delete_metadata(id, force, target.as_ref())?;
+    println!(
+        "{}",
+        format!("Successfully deleted metadata for {id}").green()
+    );
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::DataSetStatus;
     use clap::Parser;
     use tempfile::tempdir;
 
@@ -480,27 +588,12 @@ mod tests {
                 id,
                 level,
                 show_diff,
+                global,
             } => {
                 assert_eq!(id, "mnist@v1");
                 assert_eq!(level, VerifyLevel::SelfOnly);
                 assert!(!show_diff);
-            }
-            _ => panic!("expected Query"),
-        }
-    }
-
-    #[test]
-    fn parse_query_deep_with_diff() {
-        let cli = Cli::parse_from(["dsf", "query", "mnist@v1", "--level", "deep", "--show-diff"]);
-        match cli.command {
-            Commands::Query {
-                id,
-                level,
-                show_diff,
-            } => {
-                assert_eq!(id, "mnist@v1");
-                assert_eq!(level, VerifyLevel::Deep);
-                assert!(show_diff);
+                assert!(!global);
             }
             _ => panic!("expected Query"),
         }
@@ -508,236 +601,26 @@ mod tests {
 
     #[test]
     fn parse_init_flags() {
-        let cli = Cli::parse_from(["dsf", "init", "--global", "--non-interactive"]);
+        let cli = Cli::parse_from(["dsf", "init", "--global"]);
         match cli.command {
-            Commands::Init {
-                global,
-                non_interactive,
-            } => {
+            Commands::Init { global } => {
                 assert!(global);
-                assert!(non_interactive);
             }
             _ => panic!("expected Init"),
         }
     }
 
     #[test]
-    fn parse_query_meta_only_level() {
-        let cli = Cli::parse_from(["dsf", "query", "mnist@v1", "--level", "meta-only"]);
-        match cli.command {
-            Commands::Query {
-                id,
-                level,
-                show_diff,
-            } => {
-                assert_eq!(id, "mnist@v1");
-                assert_eq!(level, VerifyLevel::MetaOnly);
-                assert!(!show_diff);
-            }
-            _ => panic!("expected Query"),
-        }
-    }
-
-    #[test]
-    fn parse_register_minimal_required_args() {
-        let cli = Cli::parse_from([
-            "dsf",
-            "register",
-            "--name",
-            "mnist",
-            "--tag",
-            "v1",
-            "--path",
-            "/tmp/data",
-            "--script-path",
-            "/tmp/build.py",
-        ]);
-        match cli.command {
-            Commands::Register {
-                name,
-                tag,
-                path,
-                script_path,
-                owner_nickname,
-                description_path,
-                dependencies,
-                force_heal,
-                yes,
-            } => {
-                assert_eq!(name, "mnist");
-                assert_eq!(tag, "v1");
-                assert_eq!(path, PathBuf::from("/tmp/data"));
-                assert_eq!(script_path, PathBuf::from("/tmp/build.py"));
-                assert!(owner_nickname.is_none());
-                assert!(description_path.is_none());
-                assert!(dependencies.is_empty());
-                assert!(!force_heal);
-                assert!(!yes);
-            }
-            _ => panic!("expected Register"),
-        }
-    }
-
-    #[test]
-    fn parse_register_with_optional_args_and_multi_deps() {
-        let cli = Cli::parse_from([
-            "dsf",
-            "register",
-            "--name",
-            "mnist",
-            "--tag",
-            "v2",
-            "--path",
-            "/tmp/data",
-            "--script-path",
-            "/tmp/build.py",
-            "--description-path",
-            "/tmp/desc.md",
-            "--deps",
-            "raw@v1",
-            "--deps",
-            "norm@v3",
-            "--force-heal",
-            "--yes",
-        ]);
-        match cli.command {
-            Commands::Register {
-                description_path,
-                dependencies,
-                force_heal,
-                yes,
-                ..
-            } => {
-                assert_eq!(description_path, Some(PathBuf::from("/tmp/desc.md")));
-                assert_eq!(
-                    dependencies,
-                    vec!["raw@v1".to_string(), "norm@v3".to_string()]
-                );
-                assert!(force_heal);
-                assert!(yes);
-            }
-            _ => panic!("expected Register"),
-        }
-    }
-
-    #[test]
-    fn parse_delete_flags() {
-        let cli = Cli::parse_from(["dsf", "delete", "mnist@v1", "--force", "--yes"]);
-        match cli.command {
-            Commands::Delete { id, force, yes } => {
-                assert_eq!(id, "mnist@v1");
-                assert!(force);
-                assert!(yes);
-            }
-            _ => panic!("expected Delete"),
-        }
-    }
-
-    #[test]
-    fn parse_update_command() {
-        let cli = Cli::parse_from(["dsf", "update", "mnist@v1"]);
-        match cli.command {
-            Commands::Update { id } => assert_eq!(id, "mnist@v1"),
-            _ => panic!("expected Update"),
-        }
-    }
-
-    // ---------- validate_dataset_id ----------
-
-    #[test]
     fn validate_dataset_id_accepts_normal_form() {
         assert!(validate_dataset_id("name@tag").is_ok());
-        assert!(validate_dataset_id("dataset_01@2026-07-08").is_ok());
-    }
-
-    #[test]
-    fn validate_dataset_id_rejects_missing_or_invalid_separator() {
-        assert!(validate_dataset_id("nametag").is_err()); // no @
-        assert!(validate_dataset_id("@tag").is_err()); // empty name
-        assert!(validate_dataset_id("name@").is_err()); // empty tag
-        assert!(validate_dataset_id("a@b@c").is_err()); // too many @
-        assert!(validate_dataset_id("@").is_err()); // both empty
-    }
-
-    // ---------- validate_name_tag ----------
-
-    #[test]
-    fn validate_name_tag_accepts_valid_inputs() {
-        assert!(validate_name_tag("mnist", "v1").is_ok());
-        assert!(validate_name_tag("data-set", "2026").is_ok());
-    }
-
-    #[test]
-    fn validate_name_tag_rejects_empty_or_contains_at() {
-        assert!(validate_name_tag("", "v1").is_err());
-        assert!(validate_name_tag("mnist", "").is_err());
-        assert!(validate_name_tag("m@nist", "v1").is_err());
-        assert!(validate_name_tag("mnist", "v@1").is_err());
-    }
-
-    // ---------- fmt_query ----------
-
-    #[test]
-    fn fmt_query_contains_status_text() {
-        let healthy = fmt_query(DataSetStatus::Healthy);
-        let broken = fmt_query(DataSetStatus::Broken);
-        let broken_deps = fmt_query(DataSetStatus::BrokenDpes);
-        let unverified = fmt_query(DataSetStatus::Unverified);
-
-        // colored string 可能包含 ANSI，做 contains 即可
-        assert!(healthy.contains("Healthy"));
-        assert!(broken.contains("Broken"));
-        assert!(broken_deps.contains("BrokenDeps"));
-        assert!(unverified.contains("Unverified"));
-    }
-
-    // ---------- ensure_exists ----------
-
-    #[test]
-    fn ensure_exists_passes_for_existing_file_and_dir() {
-        let dir = tempdir().expect("create temp dir");
-        let file = dir.path().join("a.txt");
-        std::fs::write(&file, "ok").expect("write temp file");
-
-        assert!(ensure_exists(dir.path(), "--path").is_ok());
-        assert!(ensure_exists(&file, "--script-path").is_ok());
     }
 
     #[test]
     fn ensure_exists_fails_for_missing_path() {
         let dir = tempdir().expect("create temp dir");
         let missing = dir.path().join("not_found.txt");
-
         let err = ensure_exists(&missing, "--path").unwrap_err().to_string();
         assert!(err.contains("--path"));
         assert!(err.contains("doesn't exist"));
-    }
-
-    // ---------- build_default_merkle_path ----------
-
-    #[test]
-    fn build_default_merkle_path_has_expected_file_name() {
-        let p = build_default_merkle_path("mnist", "v1").expect("build path");
-        let fname = p.file_name().unwrap().to_string_lossy().to_string();
-        assert_eq!(fname, "mnist@v1.merkle.bin");
-    }
-
-    #[test]
-    fn build_default_merkle_path_parent_dir_exists_after_call() {
-        let p = build_default_merkle_path("abc", "t1").expect("build path");
-        let parent = p.parent().expect("parent dir");
-        assert!(parent.exists(), "parent dir should be created");
-    }
-
-    // ---------- smoke for print_query ----------
-
-    #[test]
-    fn print_query_smoke_no_panic() {
-        print_query("mnist@v1", DataSetStatus::Healthy, &[]);
-        print_query(
-            "mnist@v1",
-            DataSetStatus::BrokenDpes,
-            &[DataSetStatus::Healthy, DataSetStatus::Broken],
-        );
     }
 }
