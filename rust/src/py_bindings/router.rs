@@ -1,29 +1,43 @@
 use crate::backend::{BackendAddr, GlobalBackendAddr, ScopedId, ScopedMetaData};
 use crate::config::AppConfig;
-use crate::core::MetaData;
+use crate::py_bindings::core::PyMetaData;
 use crate::utils::get_username;
-use pyo3::exceptions::{PyFileNotFoundError, PyRuntimeError};
-// use pyo3::exceptions::PyRuntimeError;
+pub(crate) use pyo3::exceptions::{PyFileNotFoundError, PyRuntimeError};
 use pyo3::prelude::*;
 
 #[pyclass(name = "ScopedMetaData", skip_from_py_object)]
-pub struct PyScopedMetaData(pub BackendAddr, pub MetaData);
+pub struct PyScopedMetaData {
+    #[pyo3(get)]
+    pub backend: PyBackendAddr,
+    #[pyo3(get)]
+    pub metadata: PyMetaData,
+}
 
 #[pyclass(name = "ScopedId", skip_from_py_object)]
-pub struct PyScopedId(pub BackendAddr, pub String);
-
-impl From<ScopedMetaData> for PyScopedMetaData {
-    fn from(smeta: ScopedMetaData) -> Self {
-        PyScopedMetaData(smeta.0, smeta.1)
-    }
+pub struct PyScopedId {
+    #[pyo3(get)]
+    pub backend: PyBackendAddr,
+    #[pyo3(get)]
+    pub id: String,
 }
 
 impl From<ScopedId> for PyScopedId {
     fn from(sid: ScopedId) -> Self {
-        PyScopedId(sid.0, sid.1)
+        PyScopedId {
+            backend: sid.0.into(),
+            id: sid.1,
+        }
     }
 }
 
+impl From<ScopedMetaData> for PyScopedMetaData {
+    fn from(smeta: ScopedMetaData) -> Self {
+        PyScopedMetaData {
+            backend: smeta.0.into(),
+            metadata: smeta.1.into(),
+        }
+    }
+}
 pub trait ToPyVec<T> {
     fn to_py_vec(self) -> Vec<T>;
 }
@@ -45,6 +59,11 @@ pub struct PyBackendAddr {
 impl From<PyBackendAddr> for BackendAddr {
     fn from(value: PyBackendAddr) -> Self {
         value.inner
+    }
+}
+impl From<BackendAddr> for PyBackendAddr {
+    fn from(addr: BackendAddr) -> Self {
+        PyBackendAddr { inner: addr }
     }
 }
 
