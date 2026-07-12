@@ -76,6 +76,19 @@ impl AppConfig {
 
         Ok(app_cfg)
     }
+
+    pub(crate) fn get_local_global_path() -> io::Result<PathBuf> {
+        let local_global = PathBuf::from("/etc/dataspringflow/config.yaml");
+        if !local_global.exists() {
+            let err_msg = format!(
+                "{}: {}",
+                "Local global sqlite config file not found".red().bold(),
+                local_global.to_string_lossy()
+            );
+            return Err(io::Error::new(io::ErrorKind::NotFound, err_msg));
+        }
+        Ok(local_global)
+    }
 }
 
 #[cfg(unix)]

@@ -31,6 +31,8 @@ pub enum GlobalBackendAddr {
     },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "lowercase")]
 pub enum BackendAddr {
     Private { username: String },
     Global { addr: GlobalBackendAddr },
