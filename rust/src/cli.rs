@@ -255,6 +255,7 @@ fn init_global() -> Result<()> {
 chown -R root:DSFadmin /etc/dataspringflow /var/lib/dataspringflow
 chmod 755 /etc/dataspringflow
 chmod 2775 /var/lib/dataspringflow
+find /var/lib/dataspringflow -type d -exec chmod 2775 {{}} \;
 chmod 664 "{db_file}" "{db_file}"* 2>/dev/null || true
 "#,
         db_file = db_file_path.display()

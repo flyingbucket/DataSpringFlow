@@ -9,7 +9,6 @@ use std::fs;
 use std::io;
 use std::io::Error;
 use std::io::ErrorKind;
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -35,7 +34,7 @@ fn default_busy_timeout_ms() -> u64 {
     5000
 }
 fn default_wal() -> bool {
-    true
+    false
 }
 fn default_synchronous() -> String {
     "NORMAL".to_string()
@@ -103,8 +102,6 @@ impl SqliteBackend {
             cfg: cfg.clone(),
             pool,
         };
-        let perms = fs::Permissions::from_mode(0o660);
-        fs::set_permissions(&cfg.db_path, perms)?;
         backend.init()?;
         Ok(backend)
     }
