@@ -1,11 +1,11 @@
 use dataspringflow_rs::backend::{SqliteConfig, StackedBackend, StackedBackendConfig};
 use dataspringflow_rs::service::{DSFService, RegisterOptions};
 use std::fs::{self, File};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
 /// 辅助函数：快速生成测试所需的物理文件
-fn create_dummy_req_files(base_dir: &PathBuf, name: &str) -> (PathBuf, PathBuf, PathBuf) {
+fn create_dummy_req_files(base_dir: &Path, name: &str) -> (PathBuf, PathBuf, PathBuf) {
     let ds_path = base_dir.join(format!("{}_data", name));
     let script_path = base_dir.join(format!("{}_script.py", name));
     let desc_path = base_dir.join(format!("{}_desc.md", name));
@@ -18,7 +18,7 @@ fn create_dummy_req_files(base_dir: &PathBuf, name: &str) -> (PathBuf, PathBuf, 
 }
 
 /// 建立一个干净的容器内局部 StackedBackend
-fn setup_test_service(base_dir: &PathBuf) -> DSFService {
+fn setup_test_service(base_dir: &Path) -> DSFService {
     let db_path = base_dir.join("test_dsf.db");
     let sqlite_cfg = SqliteConfig::new(db_path);
 

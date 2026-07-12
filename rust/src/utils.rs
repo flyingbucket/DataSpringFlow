@@ -75,8 +75,7 @@ pub(crate) fn build_default_merkle_path(name: &str, tag: &str) -> Result<PathBuf
     let merkle_dir = ProjectDirs::from("io", "flyingbucket", "dataspringflow")
         .map(|proj| proj.data_dir().join("merkle"))
         .unwrap_or_else(||{
-            println!("{}","Warning: Failed to find OS standard project dir. Using current working dir as a backup.\n 
-                    Check your environment varible $HOME. If using a docker, set env $DSF_CONFIG_PATH and edit that file manully.".yellow().bold());
+            log::warn!("Failed to find OS standard project dir. Using current working dir as a backup. Check your environment varible $HOME.");
             PathBuf::from("./data/merkle")
         });
     fs::create_dir_all(&merkle_dir)?;

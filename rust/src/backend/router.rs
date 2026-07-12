@@ -57,7 +57,7 @@ impl GlobalBackendAddr {
 
                 let true_sqlite_cfg = target_app_cfg.backend.private_sqlite_cfg;
 
-                println!(
+                log::info!(
                     "Successfully resolved global backend with DB: {}",
                     true_sqlite_cfg.db_path.display()
                 );
@@ -124,7 +124,7 @@ impl StackedBackend {
                     GlobalBackend::Sqlite(bac) => Some((g.clone(), GlobalBackend::Sqlite(bac))),
                 },
                 Err(e) => {
-                    eprintln!("Warning: Skipping broken backend: {e}");
+                    log::warn!("Skipping broken backend: {e}");
                     None
                 }
             })
