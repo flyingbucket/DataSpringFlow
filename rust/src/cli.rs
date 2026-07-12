@@ -2,9 +2,9 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 use dialoguer::{Confirm, Select};
-use std::env;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -40,6 +40,12 @@ pub enum Commands {
 
     /// Show current application environment and backend database configurations
     ShowConfig,
+
+    /// Grant DSFadmin privileges to a user
+    Grant {
+        /// The username to grant privileges. If omitted, uses current user.
+        username: Option<String>,
+    },
 
     /// Query dataset status
     Query {
@@ -121,6 +127,7 @@ pub fn run(cli: Cli) -> Result<()> {
             show_diff,
             global,
         } => handle_query(&id, level, show_diff, global),
+        Commands::Grant { username } => handle_grant(username),
         Commands::Register {
             name,
             tag,
@@ -169,15 +176,7 @@ fn get_target_addr(global: bool) -> Option<BackendAddr> {
     }
 }
 
-pub fn handle_init(global_flag: bool) -> Result<()> {
-    let username = env::var("USER")
-        .or_else(|_| env::var("LOGNAME"))
-        .unwrap_or_else(|_| "root".to_string());
-
-    if username == "root" {
-        println!("{}", "Warning: You are running directly as root. It is recommended to run this as a normal user to capture your true identity.".yellow());
-    }
-
+fn handle_init(global_flag: bool) -> Result<()> {
     let mode = if global_flag {
         InstallMode::Global
     } else {
@@ -198,9 +197,8 @@ pub fn handle_init(global_flag: bool) -> Result<()> {
     };
 
     match mode {
-        InstallMode::Global => init_global(&username)?,
+        InstallMode::Global => init_global()?,
         InstallMode::User => init_user()?,
-        _ => bail!("Unsupported installation mode"),
     }
 
     println!(
@@ -210,90 +208,73 @@ pub fn handle_init(global_flag: bool) -> Result<()> {
     Ok(())
 }
 
-fn init_global(username: &str) -> Result<()> {
+fn init_global() -> Result<()> {
+    if !is_root() {
+        bail!("{}", "Error: 'init --global' requires root privileges. Please run with 'sudo dsf init --global'".red().bold());
+    }
+
     println!(
         "{}",
-        "\n[Global Setup] Requesting sudo privileges to configure system directories and groups..."
-            .yellow()
-            .bold()
+        "\n[Global Setup] Initializing system directories and database...".cyan()
     );
 
     let config_path = PathBuf::from("/etc/dataspringflow/config.yaml");
     let data_path = PathBuf::from("/var/lib/dataspringflow");
+    let db_file_path = data_path.join("dsf.db");
 
-    let setup_script = format!(
-        r#"
-set -e
-groupadd -f DSFadmin
+    fs::create_dir_all(&data_path)?;
+    fs::create_dir_all(data_path.join("merkle"))?;
+    fs::create_dir_all(data_path.join("descriptions"))?;
+    fs::create_dir_all("/etc/dataspringflow")?;
 
-mkdir -p /etc/dataspringflow
-mkdir -p /var/lib/dataspringflow/merkle
-mkdir -p /var/lib/dataspringflow/descriptions
+    // creating group DSFadmin
+    println!("{}", "Creating admin gropu DSFadmin".cyan());
+    let _ = Command::new("groupadd").arg("-f").arg("DSFadmin").status();
 
-chown root:DSFadmin /etc/dataspringflow /var/lib/dataspringflow
-chmod 755 /etc/dataspringflow
-chmod 2775 /var/lib/dataspringflow
-chmod g+s /var/lib/dataspringflow # Inherit group for WAL/SHM files
-
-if [ "{user}" != "root" ]; then
-    usermod -aG DSFadmin {user}
-fi
-"#,
-        user = username
-    );
-
-    let status = Command::new("sudo")
-        .arg("sh")
-        .arg("-c")
-        .arg(&setup_script)
-        .status()
-        .context("Failed to execute sudo commands. Do you have sudo privileges?")?;
-
-    if !status.success() {
-        bail!("System environment setup failed.");
-    }
-
-    let sqlite_cfg = SqliteConfig::new(data_path.join("dsf.db"));
-    let stacked_cfg = StackedBackendConfig {
-        private_sqlite_cfg: sqlite_cfg.clone(),
-        global_repos: vec![], // Global instance itself has no further global upstream
-    };
-
+    // get and write config file
+    let sqlite_cfg = SqliteConfig::new(db_file_path.clone());
     let final_config = AppConfig {
         mode: InstallMode::Global,
         config_path: Some(config_path.clone()),
-        backend: stacked_cfg,
+        backend: StackedBackendConfig {
+            private_sqlite_cfg: sqlite_cfg.clone(),
+            global_repos: vec![],
+        },
     };
+    let config_yaml = serde_yaml::to_string(&final_config)?;
+    fs::write(&config_path, &config_yaml)?;
 
-    let config_yaml =
-        serde_yaml::to_string(&final_config).context("Failed to serialize AppConfig")?;
-    let temp_config = env::temp_dir().join("dsf_global_config_temp.yaml");
-    fs::write(&temp_config, &config_yaml)?;
+    // config file 644
+    fs::set_permissions(&config_path, fs::Permissions::from_mode(0o644))?;
 
-    let mv_script = format!(
-        "mv {} {} && chown root:DSFadmin {} && chmod 644 {}",
-        temp_config.display(),
-        config_path.display(),
-        config_path.display(),
-        config_path.display()
+    println!("{}", "Migrating global database schemas...".cyan());
+    SqliteBackend::new(sqlite_cfg)?;
+
+    let fix_perm_script = format!(
+        r#"
+chown -R root:DSFadmin /etc/dataspringflow /var/lib/dataspringflow
+chmod 755 /etc/dataspringflow
+chmod 2775 /var/lib/dataspringflow
+chmod 664 "{db_file}" "{db_file}"* 2>/dev/null || true
+"#,
+        db_file = db_file_path.display()
     );
-    Command::new("sudo")
-        .arg("sh")
+    Command::new("sh")
         .arg("-c")
-        .arg(&mv_script)
+        .arg(&fix_perm_script)
         .status()?;
 
-    println!("{}", "Initializing global database backend...".cyan());
-    if let Err(e) = SqliteBackend::new(sqlite_cfg) {
-        println!(
-            "{}",
-            format!("Database initialization skipped: {e}").yellow()
-        );
-        println!("{}", "Note: Your user was added to `DSFadmin`, but group memberships need a session refresh. Run `su - $USER` to take effect!".yellow().bold());
-    }
+    println!(
+        "{}",
+        "Global environment and database initialized successfully!"
+            .green()
+            .bold()
+    );
+    println!(
+        "{}",
+        "Next step: Please run 'sudo dsf grant <username>' to authorize developers.".yellow()
+    );
 
-    // Automatically trigger user init to link the local sandbox to this new global registry
-    init_user()?;
     Ok(())
 }
 
@@ -411,6 +392,27 @@ fn ensure_acl_permissions(home: &Path, data_dir: &Path, group: &str) -> Result<(
     run(&["-d", "-m", &rule], data_dir)?;
     run(&["-R", "-m", &rule], data_dir)?;
 
+    Ok(())
+}
+
+fn handle_grant(username: Option<String>) -> Result<()> {
+    let final_name = username.unwrap_or_else(|| get_username().unwrap_or_default());
+
+    if final_name.is_empty() {
+        bail!("Could not determine username.");
+    }
+    let status = Command::new("sudo")
+        .arg("usermod")
+        .arg("-aG")
+        .arg("DSFadmin")
+        .arg(&final_name)
+        .status()?;
+
+    if !status.success() {
+        bail!("Failed to grant privileges to user: {}", final_name);
+    }
+
+    println!("Successfully granted DSFadmin privileges to {}", final_name);
     Ok(())
 }
 
