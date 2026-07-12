@@ -120,14 +120,10 @@ fn init_global_without_root_should_fail_fast() {
         }
     }
 
-    dsf()
-        .args(["init", "--global", "--non-interactive"])
-        .assert()
-        .failure()
-        .stderr(
-            predicate::str::contains("root privileges")
-                .or(predicate::str::contains("sudo dsf init --global")),
-        );
+    dsf().args(["init", "--global"]).assert().failure().stderr(
+        predicate::str::contains("root privileges")
+            .or(predicate::str::contains("sudo dsf init --global")),
+    );
 }
 
 #[test]
