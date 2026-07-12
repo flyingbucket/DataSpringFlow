@@ -79,6 +79,14 @@ pub struct StackedBackendConfig {
     pub(crate) private_sqlite_cfg: SqliteConfig,
     pub(crate) global_repos: Vec<GlobalBackendAddr>,
 }
+impl StackedBackendConfig {
+    pub fn new(private_sqlite_cfg: SqliteConfig, global_repos: Vec<GlobalBackendAddr>) -> Self {
+        Self {
+            private_sqlite_cfg,
+            global_repos,
+        }
+    }
+}
 
 pub struct ScopedMetaData(pub BackendAddr, pub MetaData);
 pub struct ScopedId(pub BackendAddr, pub String);
