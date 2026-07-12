@@ -1,6 +1,9 @@
-use crate::core::DataSetStatus;
 use crate::core::MetaDataError;
 use crate::merkle::HashRes;
+
+#[cfg(feature = "cli")]
+use crate::core::DataSetStatus;
+
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -35,6 +38,7 @@ pub(crate) fn to_io_invalid_input(e: anyhow::Error) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
 }
 
+#[cfg(feature = "cli")]
 pub(crate) fn print_query(id: &str, status: DataSetStatus, dep_statuses: &[DataSetStatus]) {
     let s = fmt_query(status);
     println!("dataset: {}", id.cyan());
@@ -48,6 +52,7 @@ pub(crate) fn print_query(id: &str, status: DataSetStatus, dep_statuses: &[DataS
     }
 }
 
+#[cfg(feature = "cli")]
 pub(crate) fn fmt_query(s: DataSetStatus) -> String {
     match s {
         DataSetStatus::Healthy => "Healthy".green().to_string(),
