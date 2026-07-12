@@ -65,7 +65,7 @@ impl AppConfig {
         let mut app_cfg = serde_yaml::from_str::<Self>(&content).map_err(|e| {
             let err_msg = format!(
                 "{}\n({}):{e}",
-                "Parse config yaml failed".red().to_string(),
+                "Parse config yaml failed".red(),
                 config_path.display()
             );
             Error::new(ErrorKind::InvalidData, err_msg)
@@ -89,9 +89,4 @@ impl AppConfig {
         }
         Ok(local_global)
     }
-}
-
-#[cfg(unix)]
-pub(crate) fn is_root() -> bool {
-    unsafe { libc::geteuid() == 0 }
 }

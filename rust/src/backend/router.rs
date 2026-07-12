@@ -2,8 +2,8 @@ use crate::backend::{DatasetBackend, DynBackend, RemoteBackend, SqliteBackend, S
 use crate::config::AppConfig;
 use crate::core::{MetaData, MetaDataError};
 use crate::utils::get_username;
-// use crate::backend::DynBackend;
 
+use colored::Colorize;
 use serde::{Deserialize, Serialize};
 
 use std::fs;
@@ -13,11 +13,6 @@ use std::path::PathBuf;
 pub enum GlobalBackend {
     Sqlite(SqliteBackend),
     Remote(RemoteBackend),
-}
-
-pub enum BackendInstence {
-    Global(GlobalBackend),
-    Private(SqliteBackend),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -168,7 +163,10 @@ impl StackedBackend {
                     None => Err(io::Error::new(
                         io::ErrorKind::NotFound,
                         format!(
+                            "{}",
                             "Target global backend is either unreachable or not found in config"
+                                .red()
+                                .bold()
                         ),
                     )),
                 }
@@ -267,16 +265,16 @@ impl StackedBackend {
 
         // 依次查询当前服务器配置的所有公有后端
         for (global_addr, backend) in &self.reachable_global_be {
-            if let GlobalBackend::Sqlite(sqlite_be) = backend {
-                if let Ok(refs) = sqlite_be.check_is_referenced(target_id) {
-                    for id in refs {
-                        references.push(ScopedId(
-                            BackendAddr::Global {
-                                addr: global_addr.clone(),
-                            },
-                            id,
-                        ));
-                    }
+            if let GlobalBackend::Sqlite(sqlite_be) = backend
+                && let Ok(refs) = sqlite_be.check_is_referenced(target_id)
+            {
+                for id in refs {
+                    references.push(ScopedId(
+                        BackendAddr::Global {
+                            addr: global_addr.clone(),
+                        },
+                        id,
+                    ));
                 }
             }
         }
@@ -300,16 +298,16 @@ impl StackedBackend {
         }
 
         for (global_addr, backend) in &self.reachable_global_be {
-            if let GlobalBackend::Sqlite(sqlite_be) = backend {
-                if let Ok(metas) = sqlite_be.list_all_metadata() {
-                    for meta in metas {
-                        unique_metas.push(ScopedMetaData(
-                            BackendAddr::Global {
-                                addr: global_addr.clone(),
-                            },
-                            meta,
-                        ));
-                    }
+            if let GlobalBackend::Sqlite(sqlite_be) = backend
+                && let Ok(metas) = sqlite_be.list_all_metadata()
+            {
+                for meta in metas {
+                    unique_metas.push(ScopedMetaData(
+                        BackendAddr::Global {
+                            addr: global_addr.clone(),
+                        },
+                        meta,
+                    ));
                 }
             }
         }

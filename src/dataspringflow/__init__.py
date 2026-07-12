@@ -4,6 +4,9 @@ from .dataspringflow_rs import (
     DataSetVerifyRes,
     DatasetStatus,
     MetaData,
+    BackendAddr,
+    ScopedId,
+    ScopedMetaData,
 )
 
 __all__ = [
@@ -12,4 +15,7 @@ __all__ = [
     "MetaData",
     "DSFDataset",
     "DSFService",
+    "BackendAddr",
+    "ScopedId",
+    "ScopedMetaData",
 ]

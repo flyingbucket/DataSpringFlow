@@ -30,11 +30,6 @@ impl DSFService {
         Self { backend }
     }
 
-    // #[inline]
-    // fn backend(&self) -> BackendRef<'_> {
-    //     self.backend.as_ref()
-    // }
-
     /// query metadata according on id
     pub fn query_meta(&self, id: &str) -> io::Result<Vec<ScopedMetaData>> {
         validate_dataset_id(id).map_err(to_io_invalid_input)?;
