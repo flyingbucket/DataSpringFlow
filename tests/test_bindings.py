@@ -1,5 +1,5 @@
 import unittest
-import dataspringflow as dsf
+import pydsf as dsf
 
 
 class TestDSFPublicExportsAndCore(unittest.TestCase):

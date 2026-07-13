@@ -14,10 +14,6 @@ dependencies = []
 
 # maturin config
 [tool.maturin]
-manifest-path = "rust/Cargo.toml"                   # rust project path
-features = ["pyo3/extension-module", "py_bindings"] # with pyo3
+manifest-path = "rust/dsf-py/Cargo.toml" # rust project path
 python-source = "src"
-module-name = "dataspringflow.dataspringflow_rs"
-
-# [tool.maturin.hooks]
-# post-build = "python generate_stubs.py"
+module-name = "pydsf"
