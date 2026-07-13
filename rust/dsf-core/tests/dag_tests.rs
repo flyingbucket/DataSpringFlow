@@ -3,9 +3,9 @@ mod common;
 #[cfg(test)]
 mod tests {
     use super::common::{MemoryBackend, TestSandbox};
-    use dataspringflow_rs::backend::DatasetBackend;
-    use dataspringflow_rs::core::MetaData;
-    use dataspringflow_rs::dag::*;
+    use dsf_core::backend::DatasetBackend;
+    use dsf_core::core::MetaData;
+    use dsf_core::dag::*;
 
     /// 辅助函数：根据邻接关系在 MemoryBackend 中注册一组 Mock MetaData
     fn setup_mock_backend(
