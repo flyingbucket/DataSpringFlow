@@ -1,4 +1,4 @@
-use crate::backend::DatasetBackend;
+use crate::backend::{BackendError, BackendResult, DatasetBackend, capture_backtrace};
 use crate::core::MetaData;
 use r2d2::Pool;
 use r2d2::PooledConnection;
@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::io::Error;
-use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -85,7 +84,7 @@ pub struct SqliteBackend {
 }
 
 impl SqliteBackend {
-    pub fn new(cfg: SqliteConfig) -> io::Result<Self> {
+    pub fn new(cfg: SqliteConfig) -> BackendResult<Self> {
         if let Some(parent) = cfg.db_path.parent()
             && !parent.as_os_str().is_empty()
         {
@@ -106,7 +105,7 @@ impl SqliteBackend {
         Ok(backend)
     }
 
-    fn conn(&self) -> io::Result<PooledConnection<SqliteConnectionManager>> {
+    fn conn(&self) -> BackendResult<PooledConnection<SqliteConnectionManager>> {
         let conn = self
             .pool
             .get()
@@ -116,35 +115,48 @@ impl SqliteBackend {
         Ok(conn)
     }
 
-    fn apply_pragmas(&self, conn: &Connection) -> io::Result<()> {
+    fn apply_pragmas(&self, conn: &Connection) -> BackendResult<()> {
         conn.busy_timeout(Duration::from_millis(self.cfg.busy_timeout_ms))
             .map_err(|e| Error::other(format!("set busy_timeout failed: {e}")))?;
 
         let wal_mode = if self.cfg.wal { "WAL" } else { "DELETE" };
         conn.pragma_update(None, "journal_mode", wal_mode)
-            .map_err(|e| Error::other(format!("set journal_mode failed: {e}")))?;
+            .map_err(|e| {
+                capture_backtrace();
+                BackendError::SetPragma {
+                    message: format!("journal_mode {e}"),
+                }
+            })?;
 
         let sync = self.cfg.synchronous.to_uppercase();
         if sync != "NORMAL" && sync != "FULL" {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                format!(
-                    "invalid synchronous value: {}, expected NORMAL or FULL",
+            return Err(BackendError::InvalidConfig {
+                message: format!(
+                    "synchronous value {}, expected NORMAL or FULL",
                     self.cfg.synchronous
                 ),
-            ));
+            });
         }
         conn.pragma_update(None, "synchronous", &sync)
-            .map_err(|e| Error::other(format!("set synchronous failed: {e}")))?;
+            .map_err(|e| {
+                capture_backtrace();
+                BackendError::SetPragma {
+                    message: format!("synchronous: {e}"),
+                }
+            })?;
 
         let fk = if self.cfg.foreign_keys { "ON" } else { "OFF" };
-        conn.pragma_update(None, "foreign_keys", fk)
-            .map_err(|e| Error::other(format!("set foreign_keys failed: {e}")))?;
+        conn.pragma_update(None, "foreign_keys", fk).map_err(|e| {
+            capture_backtrace();
+            BackendError::SetPragma {
+                message: format!("foreign_keys: {e}"),
+            }
+        })?;
 
         Ok(())
     }
 
-    fn init(&self) -> io::Result<()> {
+    fn init(&self) -> BackendResult<()> {
         let conn = self.conn()?;
         conn.execute_batch(
             r#"
@@ -165,80 +177,93 @@ impl SqliteBackend {
             ON datasets(name, tag);
             "#,
         )
-        .map_err(|e| Error::other(format!("init schema failed: {e}")))?;
+        .map_err(|e| {
+            capture_backtrace();
+            log::error!("init schema failed");
+            BackendError::StorageError { source: e }
+        })?;
         Ok(())
     }
 }
 
 impl DatasetBackend for SqliteBackend {
-    fn get_metadata(&self, id: &str) -> io::Result<MetaData> {
+    fn get_metadata(&self, id: &str) -> BackendResult<MetaData> {
         let conn = self.conn()?;
 
-        let row = conn
-            .query_row(
-                r#"
-                SELECT name, tag, hash, path, description_path, script_path, owner, dependencies_json, merkle_tree_path
-                FROM datasets
-                WHERE id = ?1
-                "#,
-                params![id],
-                |row| {
-                    let name: String = row.get(0)?;
-                    let tag: String = row.get(1)?;
-                    let hash: String = row.get(2)?;
-                    let path: String = row.get(3)?;
-                    let description_path: String = row.get(4)?;
-                    let script_path: String = row.get(5)?;
-                    let owner:String=row.get(6)?;
-                    let dependencies_json: String = row.get(7)?;
-                    let merkle_tree_path: String = row.get(8)?;
+        let raw_data = conn
+        .query_row(
+            r#"
+            SELECT name, tag, hash, path, description_path, script_path, owner, dependencies_json, merkle_tree_path
+            FROM datasets WHERE id = ?1
+            "#,
+            params![id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?, // dependencies_json
+                    row.get::<_, String>(8)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(BackendError::from)?;
 
-                    let dependencies: Vec<String> = serde_json::from_str(&dependencies_json).map_err(|e| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            6,
-                            rusqlite::types::Type::Text,
-                            Box::new(e),
-                        )
-                    })?;
+        // 3. 检查数据是否存在
+        let (
+            name,
+            tag,
+            hash,
+            path,
+            description_path,
+            script_path,
+            owner,
+            dependencies_json,
+            merkle_tree_path,
+        ) = raw_data.ok_or_else(|| {
+            capture_backtrace();
+            BackendError::DatasetNotFound { id: id.to_string() }
+        })?;
 
-                    Ok(MetaData {
-                        name,
-                        tag,
-                        hash,
-                        path: PathBuf::from(path),
-                        description_path: PathBuf::from(description_path),
-                        script_path: PathBuf::from(script_path),
-                        owner,
-                        dependencies,
-                        merkle_tree_path: PathBuf::from(merkle_tree_path),
-                    })
-                },
-            )
-            .optional()
-            .map_err(|e| Error::other(format!("query metadata failed: {e}")))?;
+        let dependencies: Vec<String> = serde_json::from_str(&dependencies_json).map_err(|e| {
+            capture_backtrace();
+            BackendError::SerializationError {
+                message: e.to_string(),
+            }
+        })?;
 
-        row.ok_or_else(|| {
-            Error::new(
-                ErrorKind::NotFound,
-                format!("dataset metadata not found: {id}"),
-            )
+        Ok(MetaData {
+            name,
+            tag,
+            hash,
+            path: PathBuf::from(path),
+            description_path: PathBuf::from(description_path),
+            script_path: PathBuf::from(script_path),
+            owner,
+            dependencies,
+            merkle_tree_path: PathBuf::from(merkle_tree_path),
         })
     }
 
-    fn save_metadata(&self, metadata: &MetaData) -> io::Result<()> {
+    fn save_metadata(&self, metadata: &MetaData) -> BackendResult<()> {
         let mut conn = self.conn()?;
 
         let deps_json = serde_json::to_string(&metadata.dependencies).map_err(|e| {
-            Error::new(
-                ErrorKind::InvalidData,
-                format!("serialize deps failed: {e}"),
-            )
+            capture_backtrace();
+            BackendError::SerializationError {
+                message: format!("serialize deps failed: {e}"),
+            }
         })?;
 
         // ACID: 用事务保证原子性；失败自动回滚
-        let tx = conn
-            .transaction()
-            .map_err(|e| Error::other(format!("begin transaction failed: {e}")))?;
+        let tx = conn.transaction().map_err(|e| BackendError::PoolError {
+            message: format!("save metadata failed: {e}"),
+        })?;
 
         tx.execute(
             r#"
@@ -268,17 +293,15 @@ impl DatasetBackend for SqliteBackend {
                 deps_json,
                 metadata.merkle_tree_path.to_string_lossy(),
             ],
-        )
-        .map_err(|e| Error::other(format!("save metadata failed: {e}")))?;
+        )?;
 
-        tx.commit()
-            .map_err(|e| Error::other(format!("commit transaction failed: {e}")))?;
+        tx.commit()?;
 
         Ok(())
     }
 
     /// 检查是否有任何数据集依赖了指定的 target_id
-    fn check_is_referenced(&self, target_id: &str) -> io::Result<Vec<String>> {
+    fn check_is_referenced(&self, target_id: &str) -> BackendResult<Vec<String>> {
         let conn = self.conn()?;
         // 在 JSON 数组中查找，构造带双引号的子串，防止短名字误匹配（如匹配 "id1" 不会命中 "id10"）
         let pattern = format!("%\"{}\"%", target_id);
@@ -302,7 +325,7 @@ impl DatasetBackend for SqliteBackend {
         Ok(parents)
     }
 
-    fn list_all_metadata(&self) -> io::Result<Vec<MetaData>> {
+    fn list_all_metadata(&self) -> BackendResult<Vec<MetaData>> {
         let conn = self.conn()?;
 
         // 准备查询语句，捞出表内的全部元数据字段
@@ -364,7 +387,7 @@ impl DatasetBackend for SqliteBackend {
         Ok(all_metadata)
     }
 
-    fn delete_metadata(&self, id: &str) -> io::Result<()> {
+    fn delete_metadata(&self, id: &str) -> BackendResult<()> {
         let mut conn = self.conn()?;
 
         let tx = conn
@@ -379,10 +402,8 @@ impl DatasetBackend for SqliteBackend {
         // 在工业级设计中，可以选择抛出 NotFound 错误，也可以静默当作 Ok(()) 成功。
         // 这里推荐严格抛出 NotFound，给前端 CLI 或者业务层提供精准的反馈控制。
         if rows_affected == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("cannot delete dataset: id '{}' not found in database", id),
-            ));
+            capture_backtrace();
+            return Err(BackendError::DatasetNotFound { id: id.to_string() });
         }
 
         tx.commit()

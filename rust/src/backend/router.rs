@@ -1,9 +1,9 @@
+use crate::backend::{BackendError, BackendResult};
 use crate::backend::{DatasetBackend, DynBackend, RemoteBackend, SqliteBackend, SqliteConfig};
 use crate::config::AppConfig;
 use crate::core::{MetaData, MetaDataError};
 use crate::utils::get_username;
 
-use colored::Colorize;
 use serde::{Deserialize, Serialize};
 
 use std::fs;
@@ -34,7 +34,7 @@ pub enum BackendAddr {
 }
 
 impl GlobalBackendAddr {
-    pub fn resolve_to_backend(&self) -> io::Result<GlobalBackend> {
+    pub fn resolve_to_backend(&self) -> BackendResult<GlobalBackend> {
         match self {
             GlobalBackendAddr::Sqlite { config_path } => {
                 let content = fs::read_to_string(config_path).map_err(|e| {
@@ -65,10 +65,10 @@ impl GlobalBackendAddr {
             }
             GlobalBackendAddr::Remote { server_url } => {
                 let _ = server_url;
-                Err(io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    "Remote backend feature is currently unimplemented. Stay tuned!",
-                ))
+                Err(BackendError::Unsupported {
+                    message: "Remote backend feature is currently unimplemented. Stay tuned!"
+                        .to_string(),
+                })
             }
         }
     }
@@ -97,7 +97,7 @@ pub struct StackedBackend {
 }
 
 impl StackedBackend {
-    pub fn new(cfg: StackedBackendConfig) -> io::Result<Self> {
+    pub fn new(cfg: StackedBackendConfig) -> BackendResult<Self> {
         let reachable_global_be = StackedBackend::resolve_all_global_idiomatic(&cfg)?;
         Ok(Self {
             cfg,
@@ -107,7 +107,7 @@ impl StackedBackend {
 
     fn resolve_all_global_idiomatic(
         cfg: &StackedBackendConfig,
-    ) -> io::Result<Vec<(GlobalBackendAddr, GlobalBackend)>> {
+    ) -> BackendResult<Vec<(GlobalBackendAddr, GlobalBackend)>> {
         let all_global = cfg
             .global_repos
             .iter()
@@ -136,7 +136,7 @@ impl StackedBackend {
     pub fn get_backend_by_addr(
         &self,
         target_backend: Option<&BackendAddr>,
-    ) -> io::Result<DynBackend> {
+    ) -> BackendResult<DynBackend> {
         match target_backend {
             None | Some(BackendAddr::Private { .. }) => {
                 let private_be = SqliteBackend::new(self.cfg.private_sqlite_cfg.clone())?;
@@ -161,28 +161,16 @@ impl StackedBackend {
                             unreachable!();
                         }
                     }
-                    Some(GlobalBackend::Remote(_remote_be)) => {
-                        // 未来实现 Remote 时，如果 Remote 实现了 Clone，可以直接 Box::new(remote_be.clone())
-                        Err(io::Error::new(
-                            io::ErrorKind::Unsupported,
-                            "Remote backend is currently unimplemented",
-                        ))
-                    }
-                    None => Err(io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!(
-                            "{}",
-                            "Target global backend is either unreachable or not found in config"
-                                .red()
-                                .bold()
-                        ),
-                    )),
+                    Some(GlobalBackend::Remote(_remote_be)) => Err(BackendError::Unsupported {
+                        message: "Remote backend is currently unimplemented".to_string(),
+                    }),
+                    None => Err(BackendError::BackendNotFound),
                 }
             }
         }
     }
     /// Retrieves the corresponding metadata by the dataset ID.
-    pub fn get_metadata(&self, id: &str) -> io::Result<Vec<ScopedMetaData>> {
+    pub fn get_metadata(&self, id: &str) -> BackendResult<Vec<ScopedMetaData>> {
         let mut all_meta = Vec::new();
         let private_be = SqliteBackend::new(self.cfg.private_sqlite_cfg.clone())?;
         match private_be.get_metadata(id) {
@@ -192,9 +180,10 @@ impl StackedBackend {
                 };
                 all_meta.push(ScopedMetaData(addr, meta));
             }
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            Err(BackendError::DatasetNotFound { .. }) => {
                 // 私有后端无此数据，继续进入下方的公有层查询
             }
+            // 剩下的所有其他错误（如 StorageError, PermissionDenied 等）直接向上抛出
             Err(e) => return Err(e),
         }
 
@@ -214,7 +203,7 @@ impl StackedBackend {
                         meta,
                     ));
                 }
-                Err(e) if e.kind() == io::ErrorKind::NotFound => continue, // 没找到则继续找下一个公有节点
+                Err(BackendError::DatasetNotFound { .. }) => continue,
                 Err(e) => return Err(e), // 返回真实的系统错误（如磁盘损坏等）
             }
         }
@@ -222,10 +211,8 @@ impl StackedBackend {
         if !all_meta.is_empty() {
             return Ok(all_meta);
         }
-        Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("Dataset metadata not found in any stacked backend: {}", id),
-        ))
+        log::error!("Dataset metadata not found in any stacked backend: {}", id);
+        Err(BackendError::DatasetNotFound { id: id.to_string() })
     }
 
     /// Saves or updates the dataset metadata.
@@ -234,7 +221,7 @@ impl StackedBackend {
         &self,
         metadata: &MetaData,
         target_backend: Option<&BackendAddr>,
-    ) -> io::Result<()> {
+    ) -> BackendResult<()> {
         let backend_handel = self.get_backend_by_addr(target_backend)?;
         backend_handel.as_ref().save_metadata(metadata)
     }
@@ -252,14 +239,9 @@ impl StackedBackend {
         let mut references = Vec::new();
 
         // 查询私有后端是否有依赖该 target_id 的派生数据集
-        let private_be = SqliteBackend::new(self.cfg.private_sqlite_cfg.clone())?;
+        let private_be = SqliteBackend::new(self.cfg.private_sqlite_cfg.clone())
+            .map_err(|e| e.to_metadata_error())?;
         let username = get_username()?;
-        // let username = get_username().map_err(|e| {
-        //     io::Error::new(
-        //         io::ErrorKind::Other,
-        //         format!("OS username unavailable: {:?}", e),
-        //     )
-        // })?;
         if let Ok(refs) = private_be.check_is_referenced(target_id) {
             for id in refs {
                 references.push(ScopedId(
@@ -291,7 +273,7 @@ impl StackedBackend {
     }
 
     /// Lists all available dataset metadata from the backend.
-    pub fn list_all_metadata(&self) -> io::Result<Vec<ScopedMetaData>> {
+    pub fn list_all_metadata(&self) -> BackendResult<Vec<ScopedMetaData>> {
         let mut unique_metas = Vec::new();
 
         let private_be = SqliteBackend::new(self.cfg.private_sqlite_cfg.clone())?;
@@ -326,12 +308,13 @@ impl StackedBackend {
     /// Deletes the metadata associated with the specified dataset ID.
     /// note: this mucntion only deletes the metadata and detach this dataset from backend regisitration,
     /// real data on disk will be safe
-    pub fn delete_metadata(&self, id: &str) -> io::Result<()> {
+    pub fn delete_metadata(&self, id: &str) -> BackendResult<()> {
         // 从私有可写层擦除
         let private_be = SqliteBackend::new(self.cfg.private_sqlite_cfg.clone())?;
         match private_be.delete_metadata(id) {
             Ok(_) => return Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+
+            Err(BackendError::DatasetNotFound { .. }) => {
                 // 当前私有空间不存在该数据，放行至全局空间探测
             }
             Err(e) => return Err(e),
@@ -345,19 +328,17 @@ impl StackedBackend {
             let res = backend.delete_metadata(id);
             match res {
                 Ok(_) => return Ok(()),
-                Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+                Err(BackendError::DatasetNotFound { .. }) => continue,
                 // 如果普通用户尝试删除全局数据，这里会直接将 SQLite Driver 抛出的 io::ErrorKind::PermissionDenied 透传回前端
                 Err(e) => return Err(e),
             }
         }
 
         // 若经历整个 Stack 都未能命中删除id
-        Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!(
-                "Cannot delete dataset: id '{}' not found in any level of StackBackend",
-                id
-            ),
-        ))
+        log::error!(
+            "Cannot delete dataset: id '{}' not found in any level of StackBackend",
+            id
+        );
+        Err(BackendError::DatasetNotFound { id: id.to_string() })
     }
 }

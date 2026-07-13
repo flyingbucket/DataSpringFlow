@@ -1,7 +1,6 @@
 use dataspringflow_rs::backend::DatasetBackend;
 use dataspringflow_rs::backend::{SqliteBackend, SqliteConfig};
 use dataspringflow_rs::core::MetaData;
-use std::io::ErrorKind;
 use std::path::PathBuf;
 use tempfile::tempdir;
 
@@ -97,8 +96,10 @@ fn test_get_metadata_not_found_returns_none() {
     // 探测不存在的 ID
     let res = backend.get_metadata("ghost_dataset@v9.9");
     assert!(res.is_err(), "对于不存在的 ID，应该返回 Err");
+    let backend_err = res.unwrap_err();
+    let io_err = backend_err.to_io_error();
     assert_eq!(
-        res.unwrap_err().kind(),
+        io_err.kind(),
         std::io::ErrorKind::NotFound,
         "必须精确返回 NotFound 错误"
     );
@@ -121,8 +122,10 @@ fn test_delete_metadata_success_and_fail_subsequent() {
     // 确认已经被清除
     let check = backend.get_metadata(id);
     assert!(check.is_err(), "对于不存在的 ID，应该返回 Err");
+    let backend_err = check.unwrap_err();
+    let io_err = backend_err.to_io_error();
     assert_eq!(
-        check.unwrap_err().kind(),
+        io_err.kind(),
         std::io::ErrorKind::NotFound,
         "必须精确返回 NotFound 错误"
     );
@@ -131,10 +134,13 @@ fn test_delete_metadata_success_and_fail_subsequent() {
     // rows_affected == 0 时抛出精准的 NotFound
     let res = backend.delete_metadata(id);
     assert!(res.is_err(), "重复删除同一个 ID 应当报错");
+
+    let backend_err = res.unwrap_err();
+    let io_err = backend_err.to_io_error();
     assert_eq!(
-        res.unwrap_err().kind(),
-        ErrorKind::NotFound,
-        "重复删除或删除不存在的元数据必须精确返回 NotFound 错误"
+        io_err.kind(),
+        std::io::ErrorKind::NotFound,
+        "必须精确返回 NotFound 错误"
     );
 }
 

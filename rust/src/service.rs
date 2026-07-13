@@ -33,7 +33,7 @@ impl DSFService {
     /// query metadata according on id
     pub fn query_meta(&self, id: &str) -> io::Result<Vec<ScopedMetaData>> {
         validate_dataset_id(id).map_err(to_io_invalid_input)?;
-        self.backend.get_metadata(id)
+        self.backend.get_metadata(id).map_err(|e| e.to_io_error())
     }
 
     /// register new dataset
@@ -158,7 +158,10 @@ impl DSFService {
         show_diff: bool,
         target_backend: Option<&BackendAddr>,
     ) -> Result<DataSetVerifyRes, DatasetGraphError> {
-        let backend_handel = self.backend.get_backend_by_addr(target_backend)?;
+        let backend_handel = self
+            .backend
+            .get_backend_by_addr(target_backend)
+            .map_err(|e| e.to_dag_error())?;
         let backend_ref = backend_handel.as_ref();
         let mut ds = DSFDataSet::load_from_id(id, backend_ref)?;
         ds.verify(backend_ref, show_diff)
@@ -181,7 +184,9 @@ impl DSFService {
     /// list all metadata registered on this machine
     /// wrap and expose from backend
     pub fn list_all_metadata(&self) -> io::Result<Vec<ScopedMetaData>> {
-        self.backend.list_all_metadata()
+        self.backend
+            .list_all_metadata()
+            .map_err(|e| e.to_io_error())
     }
 
     /// list all datasets that depend on <target_id>

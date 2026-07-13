@@ -183,7 +183,7 @@ pub struct DataSetVerifyRes {
 
 impl DSFDataSet {
     pub(crate) fn load_from_id(id: &str, backend: BackendRef) -> io::Result<Self> {
-        let metadata = backend.get_metadata(id)?;
+        let metadata = backend.get_metadata(id).map_err(|e| e.to_io_error())?;
 
         Ok(DSFDataSet {
             metadata,
@@ -241,7 +241,9 @@ impl DSFDataSet {
     }
 
     pub(crate) fn commit(&self, backend: BackendRef) -> io::Result<()> {
-        backend.save_metadata(&self.metadata)?;
+        let _ = backend
+            .save_metadata(&self.metadata)
+            .map_err(|e| e.to_io_error());
         Ok(())
     }
     pub(crate) fn refresh_hash_and_merkle(&mut self) -> io::Result<()> {
