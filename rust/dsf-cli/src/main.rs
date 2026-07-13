@@ -1,4 +1,5 @@
 use anyhow::Result;
+use clap::Parser;
 use dsf_cli::cli::{Cli, run};
 
 fn main() -> Result<()> {
