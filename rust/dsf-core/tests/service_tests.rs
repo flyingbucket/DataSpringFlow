@@ -1,5 +1,5 @@
-use dataspringflow_rs::backend::{SqliteConfig, StackedBackend, StackedBackendConfig};
-use dataspringflow_rs::service::{DSFService, RegisterOptions};
+use dsf_core::backend::{SqliteConfig, StackedBackend, StackedBackendConfig};
+use dsf_core::service::{DSFService, RegisterOptions};
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;

@@ -4,8 +4,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::RwLock;
 
-use dataspringflow_rs::backend::{BackendError, BackendResult, DatasetBackend};
-use dataspringflow_rs::core::MetaData;
+use dsf_core::backend::{BackendError, BackendResult, DatasetBackend};
+use dsf_core::core::MetaData;
 
 /// 纯内存 Mock 后端
 pub struct MemoryBackend {

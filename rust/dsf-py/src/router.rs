@@ -1,7 +1,7 @@
-use crate::backend::{BackendAddr, GlobalBackendAddr, ScopedId, ScopedMetaData};
-use crate::config::AppConfig;
-use crate::py_bindings::core::PyMetaData;
-use crate::utils::get_username;
+use super::PyMetaData;
+use dsf_core::backend::{BackendAddr, GlobalBackendAddr, ScopedId, ScopedMetaData};
+use dsf_core::config::AppConfig;
+use dsf_core::utils::get_username;
 pub(crate) use pyo3::exceptions::{PyFileNotFoundError, PyRuntimeError};
 use pyo3::prelude::*;
 use serde::{Serialize, Serializer};

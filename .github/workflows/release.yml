@@ -1,0 +1,73 @@
+name: Build & Pack Highly Compatible Installer
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-pack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Install musl-tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Install Rust musl Target
+        uses: dsf-toolchain/rust-toolchain@stable # 替换为常用的 dtolnay/rust-toolchain
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-musl
+
+      - name: Build Static Rust CLI (dsf)
+        working-directory: ./rust
+        run: |
+          # 显式指定 target 为 musl，进行完全静态化编译
+          cargo build --release --target x86_64-unknown-linux-musl --bin dsf
+
+      # 步骤 2：利用 manylinux 容器编译高兼容 Python Wheel
+      - name: Set up Python Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Maturin
+        run: pip install maturin
+
+      - name: Build High-Compatibility Python Wheel
+        # 核心细节：通过 PYO3_CROSS_CARGO_ARGS 将工作区根目录强行透传给构建容器
+        # 这样即使 maturin 深入到了 dsf-py，cargo 依然能看清全局 Workspace
+        env:
+          PYO3_CROSS_CARGO_ARGS: "--manifest-path=rust/Cargo.toml"
+        run: |
+          maturin build --release --strip --manylinux 2014
+        # 步骤 3：合体装箱
+      - name: Pack Self-Extracting Installer
+        run: |
+          mkdir -p dist_payload          
+
+          # 搬运完全静态链接的 musl 二进制 CLI
+          cp rust/target/x86_64-unknown-linux-musl/release/dsf dist_payload/
+
+          #  注意这里的路径：Maturin 在全局工作区下编译，产物会统一收纳在全局 target 中
+          cp rust/target/wheels/*.whl dist_payload/
+
+          cp README.md LICENSE dist_payload/ || true
+
+          # 打包内嵌数据体并合体
+          tar -czf payload.tar.gz -C dist_payload .
+          cat scripts/install_payload.sh payload.tar.gz > dsf_installer.sh
+          chmod +x dsf_installer.sh
+      - name: Create GitHub Release and Upload Artifact
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dsf_installer.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

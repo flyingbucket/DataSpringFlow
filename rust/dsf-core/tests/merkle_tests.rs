@@ -1,4 +1,4 @@
-use dataspringflow_rs::merkle::*;
+use dsf_core::merkle::*;
 
 #[cfg(test)]
 mod tests {

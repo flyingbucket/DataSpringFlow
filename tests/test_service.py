@@ -1,7 +1,7 @@
 import unittest
 import os
 import tempfile
-from dataspringflow import (
+from pydsf import (
     DSFService,
     BackendAddr,
     DatasetStatus,

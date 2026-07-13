@@ -1,4 +1,4 @@
-use crate::core::{DSFDataSet, DataSetStatus, DataSetVerifyRes, MetaData};
+use dsf_core::core::{DSFDataSet, DataSetStatus, DataSetVerifyRes, MetaData};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use serde::Serialize;

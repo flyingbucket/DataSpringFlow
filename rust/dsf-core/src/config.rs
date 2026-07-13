@@ -52,7 +52,7 @@ impl AppConfig {
             Err(io::Error::new(io::ErrorKind::NotFound, err_msg))
         }
     }
-    pub(crate) fn load() -> io::Result<Self> {
+    pub fn load() -> io::Result<Self> {
         let (mode, config_path) = Self::resolve_path()?;
 
         let content = fs::read_to_string(&config_path).map_err(|e| {
@@ -77,8 +77,7 @@ impl AppConfig {
         Ok(app_cfg)
     }
 
-    #[cfg(feature = "py_bindings")]
-    pub(crate) fn get_local_global_path() -> io::Result<PathBuf> {
+    pub fn get_local_global_path() -> io::Result<PathBuf> {
         let local_global = PathBuf::from("/etc/dataspringflow/config.yaml");
         if !local_global.exists() {
             let err_msg = format!(

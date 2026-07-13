@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
-use dialoguer::{Confirm, Select};
+use dialoguer::Confirm;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::os::unix::fs::PermissionsExt;
@@ -10,13 +10,14 @@ use std::process::Command;
 
 use directories::ProjectDirs;
 
-use crate::backend::{
+use crate::utils::*;
+use dsf_core::backend::{
     BackendAddr, GlobalBackendAddr, SqliteBackend, SqliteConfig, StackedBackendConfig,
     build_backend_auto,
 };
-use crate::config::{AppConfig, InstallMode};
-use crate::service::{DSFService, RegisterOptions};
-use crate::utils::*;
+use dsf_core::config::{AppConfig, InstallMode};
+use dsf_core::service::{DSFService, RegisterOptions};
+use dsf_core::utils::*;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -31,7 +32,7 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Interactive initialization and installation
+    /// Initialization and installation
     Init {
         /// Global installation (/etc/dataspringflow + /var/lib/dataspringflow)
         #[arg(long, default_value_t = false)]
@@ -180,20 +181,7 @@ fn handle_init(global_flag: bool) -> Result<()> {
     let mode = if global_flag {
         InstallMode::Global
     } else {
-        let items = vec![
-            "User installation (Private sandbox in ~/.local/share/dataspringflow)",
-            "Global installation (System-wide public registry & Admin groups setup)",
-        ];
-        let idx = Select::new()
-            .with_prompt("Please select installation mode")
-            .items(&items)
-            .default(0)
-            .interact()?;
-        if idx == 0 {
-            InstallMode::User
-        } else {
-            InstallMode::Global
-        }
+        InstallMode::User
     };
 
     match mode {

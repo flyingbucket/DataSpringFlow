@@ -8,7 +8,7 @@ use self::service::PyDSFService;
 use pyo3::prelude::*;
 
 #[pymodule]
-fn dataspringflow_rs(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn pydsf(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     pyo3_log::init();
     // Register Core classes
     m.add_class::<PyDataSetStatus>()?;

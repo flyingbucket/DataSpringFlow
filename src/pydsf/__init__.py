@@ -1,4 +1,4 @@
-from .dataspringflow_rs import (
+from .pydsf import (
     DSFDataset,
     DSFService,
     DataSetVerifyRes,

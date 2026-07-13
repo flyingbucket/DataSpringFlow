@@ -137,29 +137,11 @@ impl BackendError {
         }
     }
 }
-// impl Into<std::io::Error> for BackendError {
-//     fn into(self) -> io::Error {
-//         match self {
-//             BackendError::Io { source } => source,
-//
-//             other => {
-//                 let kind = match &other {
-//                     BackendError::DatasetNotFound { .. } => io::ErrorKind::NotFound,
-//                     BackendError::BackendNotFound => io::ErrorKind::NotFound,
-//                     BackendError::AlreadyExists { .. } => io::ErrorKind::AlreadyExists,
-//                     BackendError::PermissionDenied { .. } => io::ErrorKind::PermissionDenied,
-//                     _ => io::ErrorKind::Other,
-//                 };
-//                 io::Error::new(kind, other)
-//             }
-//         }
-//     }
-// }
 
 pub type BackendResult<T> = Result<T, BackendError>;
 
 pub fn capture_backtrace() {
-    log::error!("{}", std::backtrace::Backtrace::force_capture());
+    log::debug!("{}", std::backtrace::Backtrace::force_capture());
 }
 
 pub fn build_backend_auto() -> BackendResult<StackedBackend> {
