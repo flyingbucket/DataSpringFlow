@@ -16,6 +16,7 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
+      # 步骤 1：利用 musl-tools 编译完全静态链接的 CLI (dsf)
       - name: Install musl-tools
         run: |
           sudo apt-get update
@@ -30,26 +31,17 @@ jobs:
       - name: Build Static Rust CLI (dsf)
         working-directory: ./rust
         run: |
-          # 显式指定 target 为 musl，进行完全静态化编译
           cargo build --release --target x86_64-unknown-linux-musl --bin dsf
 
-      # 步骤 2：利用 manylinux 容器编译高兼容 Python Wheel
-      - name: Set up Python Environment
-        uses: actions/setup-python@v5
+      # 步骤 2：利用容器编译基于 musl 的高兼容 Python Wheel
+      - name: Build musllinux Python Wheel
+        uses: PyO3/maturin-action@v1
         with:
-          python-version: '3.12'
+          target: x86_64-unknown-linux-musl
+          args: --release --strip --manylinux musllinux_1_1
+          working-directory: ./rust # 告诉 maturin 你的 Cargo.toml 在哪里
 
-      - name: Install Maturin
-        run: pip install maturin
-
-      - name: Build High-Compatibility Python Wheel
-        # 核心细节：通过 PYO3_CROSS_CARGO_ARGS 将工作区根目录强行透传给构建容器
-        # 这样即使 maturin 深入到了 dsf-py，cargo 依然能看清全局 Workspace
-        env:
-          PYO3_CROSS_CARGO_ARGS: "--manifest-path=rust/Cargo.toml"
-        run: |
-          maturin build --release --strip --manylinux 2014
-        # 步骤 3：合体装箱
+      # 步骤 3：合体装箱
       - name: Pack Self-Extracting Installer
         run: |
           mkdir -p dist_payload          
@@ -57,8 +49,8 @@ jobs:
           # 搬运完全静态链接的 musl 二进制 CLI
           cp rust/target/x86_64-unknown-linux-musl/release/dsf dist_payload/
 
-          #  注意这里的路径：Maturin 在全局工作区下编译，产物会统一收纳在全局 target 中
-          cp rust/target/wheels/*.whl dist_payload/
+          # 注意路径：maturin-action 默认会将生成的 .whl 放到全局的 target/wheels 目录下
+          cp target/wheels/*.whl dist_payload/
 
           cp README.md LICENSE dist_payload/ || true
 
@@ -66,6 +58,7 @@ jobs:
           tar -czf payload.tar.gz -C dist_payload .
           cat scripts/install_payload.sh payload.tar.gz > dsf_installer.sh
           chmod +x dsf_installer.sh
+
       - name: Create GitHub Release and Upload Artifact
         uses: softprops/action-gh-release@v2
         with:
