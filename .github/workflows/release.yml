@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -21,7 +22,7 @@ jobs:
           sudo apt-get install -y musl-tools
 
       - name: Install Rust musl Target
-        uses: dsf-toolchain/rust-toolchain@stable # 替换为常用的 dtolnay/rust-toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           targets: x86_64-unknown-linux-musl
