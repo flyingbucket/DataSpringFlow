@@ -1,0 +1,29 @@
+[package]
+name = "dsf-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "dsf"
+path = "src/main.rs"
+
+[dependencies]
+dsf-core = { workspace = true }
+
+clap.workspace = true
+dialoguer.workspace = true
+colored.workspace = true
+directories.workspace = true
+strum.workspace = true
+anyhow.workspace = true
+whoami.workspace = true
+log.workspace = true
+env_logger.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+assert_cmd.workspace = true
+predicates.workspace = true
+assert_fs.workspace = true

@@ -10,13 +10,14 @@ use std::process::Command;
 
 use directories::ProjectDirs;
 
-use crate::backend::{
+use crate::utils::*;
+use dsf_core::backend::{
     BackendAddr, GlobalBackendAddr, SqliteBackend, SqliteConfig, StackedBackendConfig,
     build_backend_auto,
 };
-use crate::config::{AppConfig, InstallMode};
-use crate::service::{DSFService, RegisterOptions};
-use crate::utils::*;
+use dsf_core::config::{AppConfig, InstallMode};
+use dsf_core::service::{DSFService, RegisterOptions};
+use dsf_core::utils::*;
 
 #[derive(Parser, Debug)]
 #[command(

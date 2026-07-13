@@ -9,11 +9,6 @@ use anyhow::{Result, bail};
 use directories::ProjectDirs;
 use whoami;
 
-#[cfg(feature = "cli")]
-use crate::core::DataSetStatus;
-#[cfg(feature = "cli")]
-use colored::*;
-
 pub fn hashres_to_hex(bytes: HashRes) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(64);
@@ -25,43 +20,7 @@ pub fn hashres_to_hex(bytes: HashRes) -> String {
 
     out
 }
-#[cfg(unix)]
-pub fn is_root() -> bool {
-    unsafe { libc::geteuid() == 0 }
-}
 
-pub(crate) fn get_username() -> Result<String, MetaDataError> {
-    whoami::username()
-        .map_err(|e| MetaDataError::OwnerResolveFailed(format!("OS username unavailable: {e}")))
-}
-
-pub(crate) fn to_io_invalid_input(e: anyhow::Error) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
-}
-
-#[cfg(feature = "cli")]
-pub(crate) fn print_query(id: &str, status: DataSetStatus, dep_statuses: &[DataSetStatus]) {
-    let s = fmt_query(status);
-    println!("dataset: {}", id.cyan());
-    println!("status:  {}", s);
-
-    if dep_statuses.is_empty() {
-        println!("deps:    []");
-    } else {
-        let rendered: Vec<String> = dep_statuses.iter().map(|s| fmt_query(*s)).collect();
-        println!("deps:    [{}]", rendered.join(", "));
-    }
-}
-
-#[cfg(feature = "cli")]
-pub(crate) fn fmt_query(s: DataSetStatus) -> String {
-    match s {
-        DataSetStatus::Healthy => "Healthy".green().to_string(),
-        DataSetStatus::Broken => "Broken".red().to_string(),
-        DataSetStatus::BrokenDeps => "BrokenDeps".yellow().to_string(),
-        DataSetStatus::Unverified => "Unverified".normal().to_string(),
-    }
-}
 pub(crate) fn validate_name_tag(name: &str, tag: &str) -> Result<()> {
     if name.is_empty() || tag.is_empty() {
         bail!("name/tag should not be empty");
@@ -83,7 +42,7 @@ pub(crate) fn build_default_merkle_path(name: &str, tag: &str) -> Result<PathBuf
     Ok(merkle_dir.join(format!("{}@{}.merkle.bin", name, tag)))
 }
 
-pub(crate) fn validate_dataset_id(id: &str) -> Result<()> {
+pub fn validate_dataset_id(id: &str) -> Result<()> {
     let parts: Vec<&str> = id.split('@').collect();
     if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
         bail!("Illegal id: {}，must be in form name@tag", id);
@@ -91,9 +50,23 @@ pub(crate) fn validate_dataset_id(id: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn ensure_exists(p: &Path, arg_name: &str) -> Result<()> {
+pub fn ensure_exists(p: &Path, arg_name: &str) -> Result<()> {
     if !p.exists() {
         bail!("{} dataset path doesn't exist: {}", arg_name, p.display());
     }
     Ok(())
+}
+
+#[cfg(unix)]
+pub fn is_root() -> bool {
+    unsafe { libc::geteuid() == 0 }
+}
+
+pub fn get_username() -> Result<String, MetaDataError> {
+    whoami::username()
+        .map_err(|e| MetaDataError::OwnerResolveFailed(format!("OS username unavailable: {e}")))
+}
+
+pub(crate) fn to_io_invalid_input(e: anyhow::Error) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
 }

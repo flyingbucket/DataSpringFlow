@@ -76,8 +76,8 @@ impl GlobalBackendAddr {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StackedBackendConfig {
-    pub(crate) private_sqlite_cfg: SqliteConfig,
-    pub(crate) global_repos: Vec<GlobalBackendAddr>,
+    pub private_sqlite_cfg: SqliteConfig,
+    pub global_repos: Vec<GlobalBackendAddr>,
 }
 impl StackedBackendConfig {
     pub fn new(private_sqlite_cfg: SqliteConfig, global_repos: Vec<GlobalBackendAddr>) -> Self {
