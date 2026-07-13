@@ -171,7 +171,7 @@ pub struct DSFDataSet {
 pub enum DataSetStatus {
     Healthy,
     Broken,
-    BrokenDpes,
+    BrokenDeps,
     Unverified,
 }
 
@@ -228,7 +228,7 @@ impl DSFDataSet {
             }
             DataSetStatus::Broken
         } else {
-            DataSetStatus::BrokenDpes
+            DataSetStatus::BrokenDeps
         };
 
         let detailed_status = DataSetVerifyRes {

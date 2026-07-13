@@ -1,17 +1,18 @@
 use crate::core::MetaDataError;
 use crate::merkle::HashRes;
 
-#[cfg(feature = "cli")]
-use crate::core::DataSetStatus;
-
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
-use colored::*;
 use directories::ProjectDirs;
 use whoami;
+
+#[cfg(feature = "cli")]
+use crate::core::DataSetStatus;
+#[cfg(feature = "cli")]
+use colored::*;
 
 pub fn hashres_to_hex(bytes: HashRes) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
@@ -57,7 +58,7 @@ pub(crate) fn fmt_query(s: DataSetStatus) -> String {
     match s {
         DataSetStatus::Healthy => "Healthy".green().to_string(),
         DataSetStatus::Broken => "Broken".red().to_string(),
-        DataSetStatus::BrokenDpes => "BrokenDeps".yellow().to_string(),
+        DataSetStatus::BrokenDeps => "BrokenDeps".yellow().to_string(),
         DataSetStatus::Unverified => "Unverified".normal().to_string(),
     }
 }

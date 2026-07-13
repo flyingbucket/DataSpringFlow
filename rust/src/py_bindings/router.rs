@@ -4,8 +4,13 @@ use crate::py_bindings::core::PyMetaData;
 use crate::utils::get_username;
 pub(crate) use pyo3::exceptions::{PyFileNotFoundError, PyRuntimeError};
 use pyo3::prelude::*;
+use serde::{Serialize, Serializer};
+use std::backtrace::Backtrace;
+use std::fmt;
 
 #[pyclass(name = "ScopedMetaData", skip_from_py_object)]
+#[derive(Serialize)]
+#[serde(rename = "ScopedMetaData")]
 pub struct PyScopedMetaData {
     #[pyo3(get)]
     pub backend: PyBackendAddr,
@@ -14,11 +19,49 @@ pub struct PyScopedMetaData {
 }
 
 #[pyclass(name = "ScopedId", skip_from_py_object)]
+#[derive(Serialize)]
+#[serde(rename = "ScopedId")]
 pub struct PyScopedId {
     #[pyo3(get)]
     pub backend: PyBackendAddr,
     #[pyo3(get)]
     pub id: String,
+}
+
+#[pymethods]
+impl PyScopedId {
+    fn __repr__(&self) -> String {
+        serde_json::to_string_pretty(self).unwrap_or_else(|err| {
+            let bt = Backtrace::capture();
+            log::warn!(
+                "Failed to serialize ScopedId to JSON: {}\nBacktrace:\n{}",
+                err,
+                bt
+            );
+            format!(
+                "ScopedId(id='{}', error='Failed to serialize on rust side')",
+                self.id
+            )
+        })
+    }
+}
+
+#[pymethods]
+impl PyScopedMetaData {
+    fn __repr__(&self) -> String {
+        serde_json::to_string_pretty(self).unwrap_or_else(|err| {
+            let bt = Backtrace::capture();
+            log::warn!(
+                "Failed to serialize ScopedMetaData to JSON: {}\nBacktrace:\n{}",
+                err,
+                bt
+            );
+            format!(
+                "ScopedMetaData(metadata_name='{}', error='Failed to serialize on rust side')",
+                self.metadata.name
+            )
+        })
+    }
 }
 
 impl From<ScopedId> for PyScopedId {
@@ -69,6 +112,9 @@ impl From<BackendAddr> for PyBackendAddr {
 
 #[pymethods]
 impl PyBackendAddr {
+    fn __repr__(&self) -> String {
+        format!("{:?}", self)
+    }
     /// 创建 Private 模式（自动对应 Private -> Sqlite 并使用默认路径）
     /// Python 侧调用：BackendAddr.private()
     #[staticmethod]
@@ -110,5 +156,52 @@ impl PyBackendAddr {
                 addr: GlobalBackendAddr::Remote { server_url },
             },
         }
+    }
+}
+
+impl fmt::Debug for PyBackendAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.inner {
+            BackendAddr::Private { username } => {
+                write!(f, "BackendAddr.Private(username='{}')", username)
+            }
+            BackendAddr::Global { addr } => match addr {
+                GlobalBackendAddr::Sqlite { config_path } => {
+                    write!(
+                        f,
+                        "BackendAddr.Global(Sqlite='{}')",
+                        config_path.to_string_lossy()
+                    )
+                }
+                GlobalBackendAddr::Remote { server_url } => {
+                    write!(f, "BackendAddr.Global(Remote='{}')", server_url)
+                }
+            },
+        }
+    }
+}
+
+impl Serialize for PyBackendAddr {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let s = match &self.inner {
+            BackendAddr::Private { username } => {
+                format!("BackendAddr.Private(username='{}')", username)
+            }
+            BackendAddr::Global { addr } => match addr {
+                GlobalBackendAddr::Sqlite { config_path } => {
+                    format!(
+                        "BackendAddr.Global(Sqlite='{}')",
+                        config_path.to_string_lossy()
+                    )
+                }
+                GlobalBackendAddr::Remote { server_url } => {
+                    format!("BackendAddr.Global(Remote='{}')", server_url)
+                }
+            },
+        };
+        serializer.serialize_str(&s)
     }
 }

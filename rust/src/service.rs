@@ -77,7 +77,7 @@ impl DSFService {
             }
         }
 
-        // 依赖异常且要求强制heal（service层不做交互；交互留给CLI）
+        // 依赖异常且要求强制heal TODO:
         if !broken.is_empty() {
             if !(opts.force_heal || opts.yes) {
                 bail!(
@@ -92,7 +92,7 @@ impl DSFService {
             }
         }
 
-        // E) 注册新数据集（upsert）
+        // 注册新数据集（upsert）
         let merkle_tree_path = build_default_merkle_path(&opts.name, &opts.tag)?;
         let meta = MetaData::new(
             &opts.name,
