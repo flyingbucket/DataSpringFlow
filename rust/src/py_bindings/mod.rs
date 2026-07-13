@@ -9,6 +9,7 @@ use pyo3::prelude::*;
 
 #[pymodule]
 fn dataspringflow_rs(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    pyo3_log::init();
     // Register Core classes
     m.add_class::<PyDataSetStatus>()?;
     m.add_class::<PyDataSetVerifyRes>()?;
@@ -25,6 +26,3 @@ fn dataspringflow_rs(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     Ok(())
 }
-
-// generate pyi stubs
-// pyo3_stub_gen::define_stub_info_gatherer!(stub_info_gatherer);

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
@@ -8,8 +9,6 @@ use crate::{
     merkle::{FileMerkleTree, HashRes, MerkleTreeSnapshot},
     utils::{get_username, hashres_to_hex},
 };
-
-use std::fmt;
 
 #[derive(Debug)]
 pub enum MetaDataError {
@@ -267,10 +266,10 @@ impl DSFDataSet {
         for entry in &current_tree.entries {
             if let Some(old_hash) = old_map.get(&entry.rel_path) {
                 if old_hash != &entry.hash {
-                    println!("文件哈希变动: {:?}", entry.rel_path);
+                    log::info!("File hash changed: {:?}", entry.rel_path);
                 }
             } else {
-                println!("新增文件: {:?}", entry.rel_path);
+                log::info!("New file: {:?}", entry.rel_path);
             }
         }
     }

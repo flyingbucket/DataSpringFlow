@@ -57,7 +57,7 @@ impl GlobalBackendAddr {
 
                 let true_sqlite_cfg = target_app_cfg.backend.private_sqlite_cfg;
 
-                println!(
+                log::info!(
                     "Successfully resolved global backend with DB: {}",
                     true_sqlite_cfg.db_path.display()
                 );
@@ -78,6 +78,14 @@ impl GlobalBackendAddr {
 pub struct StackedBackendConfig {
     pub(crate) private_sqlite_cfg: SqliteConfig,
     pub(crate) global_repos: Vec<GlobalBackendAddr>,
+}
+impl StackedBackendConfig {
+    pub fn new(private_sqlite_cfg: SqliteConfig, global_repos: Vec<GlobalBackendAddr>) -> Self {
+        Self {
+            private_sqlite_cfg,
+            global_repos,
+        }
+    }
 }
 
 pub struct ScopedMetaData(pub BackendAddr, pub MetaData);
@@ -116,7 +124,7 @@ impl StackedBackend {
                     GlobalBackend::Sqlite(bac) => Some((g.clone(), GlobalBackend::Sqlite(bac))),
                 },
                 Err(e) => {
-                    eprintln!("Warning: Skipping broken backend: {e}");
+                    log::warn!("Skipping broken backend: {e}");
                     None
                 }
             })

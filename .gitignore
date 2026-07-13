@@ -1,6 +1,8 @@
 # python
 *.egg-info
 *__pycache__
+.venv/
+.container_venv/
 
 # ide and tools
 .vscode/

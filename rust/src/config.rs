@@ -77,6 +77,7 @@ impl AppConfig {
         Ok(app_cfg)
     }
 
+    #[cfg(feature = "py_bindings")]
     pub(crate) fn get_local_global_path() -> io::Result<PathBuf> {
         let local_global = PathBuf::from("/etc/dataspringflow/config.yaml");
         if !local_global.exists() {
