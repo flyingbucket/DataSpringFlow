@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use super::core::PyDataSetVerifyRes;
 use super::router::{PyBackendAddr, PyScopedId, PyScopedMetaData, ToPyVec};
-use crate::backend::build_backend_auto;
-use crate::service::{DSFService, RegisterOptions};
+use dsf_core::backend::build_backend_auto;
+use dsf_core::service::{DSFService, RegisterOptions};
 
 /// Python binding for DSFService
 #[pyclass(name = "DSFService")]
