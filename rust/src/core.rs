@@ -1,16 +1,44 @@
-use directories::ProjectDirs;
 use std::collections::HashMap;
-use std::fs;
-use std::io::Write;
-use std::io::{self, Error, ErrorKind};
+use std::fmt;
+use std::io;
 use std::path::PathBuf;
 
 use crate::{
     backend::BackendRef,
     dag::{DatasetGraph, DatasetGraphError},
     merkle::{FileMerkleTree, HashRes, MerkleTreeSnapshot},
-    utils::hashres_to_hex,
+    utils::{get_username, hashres_to_hex},
 };
+
+#[derive(Debug)]
+pub enum MetaDataError {
+    InvalidName(String),
+    InvalidTag(String),
+    OwnerResolveFailed(String),
+    InvalidNickname(String),
+    Io(io::Error),
+}
+
+impl From<std::io::Error> for MetaDataError {
+    fn from(err: std::io::Error) -> Self {
+        MetaDataError::Io(err)
+    }
+}
+
+impl fmt::Display for MetaDataError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MetaDataError::InvalidName(msg) => write!(f, "invalid metadata name: {msg}"),
+            MetaDataError::InvalidTag(msg) => write!(f, "invalid metadata tag: {msg}"),
+            MetaDataError::OwnerResolveFailed(msg) => write!(f, "failed to resolve owner: {msg}"),
+            MetaDataError::InvalidNickname(msg) => write!(f, "invalid owner nickname: {msg}"),
+            MetaDataError::Io(err) => write!(f, "io error: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for MetaDataError {}
+
 #[derive(Clone, Debug)]
 pub struct MetaData {
     pub name: String,
@@ -19,6 +47,7 @@ pub struct MetaData {
     pub path: PathBuf,
     pub description_path: PathBuf,
     pub script_path: PathBuf,
+    pub owner: String,
     pub dependencies: Vec<String>,
     pub merkle_tree_path: PathBuf,
 }
@@ -27,28 +56,28 @@ impl MetaData {
     pub fn id(&self) -> String {
         format!("{}@{}", self.name, self.tag)
     }
-
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: &str,
         tag: &str,
         path: PathBuf,
         description_path: Option<PathBuf>,
         script_path: PathBuf,
+        owner_nickname: Option<String>,
         dependencies: Vec<String>,
         merkle_tree_path: PathBuf,
-    ) -> io::Result<Self> {
+    ) -> Result<Self, MetaDataError> {
         if name.contains('@') {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "Metadata name must not contain '@'",
+            return Err(MetaDataError::InvalidName(
+                "name must not contain '@'".to_string(),
             ));
         }
         if tag.contains('@') {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "Metadata tag must not contain '@'",
+            return Err(MetaDataError::InvalidTag(
+                "tag must not contain '@'".to_string(),
             ));
         }
+
         let mut merkle_tree = FileMerkleTree::new(path.clone())?;
         let hash = hashres_to_hex(merkle_tree.get_hash()?);
         merkle_tree.save_to_disk(&merkle_tree_path)?;
@@ -56,15 +85,17 @@ impl MetaData {
         let final_description_path = match description_path {
             Some(p) => p,
             None => {
-                let desc_dir = ProjectDirs::from("io", "flyingbucket", "dataspringflow")
-                    .map(|proj| proj.data_dir().join("descriptions"))
-                    .unwrap_or_else(|| std::path::PathBuf::from("./data/descriptions"));
+                let desc_dir =
+                    directories::ProjectDirs::from("io", "flyingbucket", "dataspringflow")
+                        .map(|proj| proj.data_dir().join("descriptions"))
+                        .unwrap_or_else(|| std::path::PathBuf::from("./data/descriptions"));
 
-                fs::create_dir_all(&desc_dir)?;
+                std::fs::create_dir_all(&desc_dir)?;
                 let p = desc_dir.join(format!("{}_{}.md", name, tag));
 
                 if !p.exists() {
-                    let mut f = fs::File::create(&p)?;
+                    let mut f = std::fs::File::create(&p)?;
+                    use std::io::Write;
                     writeln!(f, "# {}@{}", name, tag)?;
                     writeln!(f)?;
                     writeln!(f, "<!-- TODO: add dataset description -->")?;
@@ -72,18 +103,60 @@ impl MetaData {
                 p
             }
         };
-        let meta = Self {
+
+        let owner = Self::merge_owner_name(owner_nickname)?;
+
+        Ok(Self {
             name: name.to_string(),
             tag: tag.to_string(),
             hash,
             path,
             description_path: final_description_path,
             script_path,
+            owner,
             dependencies,
             merkle_tree_path,
-        };
+        })
+    }
 
-        Ok(meta)
+    fn merge_owner_name(nickname: Option<String>) -> Result<String, MetaDataError> {
+        let linux_user = get_username()?;
+
+        let linux_user = linux_user.trim();
+        if linux_user.is_empty() {
+            return Err(MetaDataError::OwnerResolveFailed(
+                "OS username is empty".to_string(),
+            ));
+        }
+
+        let nick = nickname.unwrap_or_default().trim().to_string();
+        if nick.is_empty() {
+            return Ok(linux_user.to_string());
+        }
+
+        if nick.contains('$') {
+            return Err(MetaDataError::InvalidNickname(
+                "nickname must not contain '$'".to_string(),
+            ));
+        }
+
+        let is_valid = nick
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-');
+
+        if !is_valid {
+            return Err(MetaDataError::InvalidNickname(
+                "nickname can only contain [a-zA-Z0-9._-]".to_string(),
+            ));
+        }
+
+        if nick.len() > 32 {
+            return Err(MetaDataError::InvalidNickname(
+                "nickname length must be <= 32".to_string(),
+            ));
+        }
+
+        Ok(format!("{linux_user}${nick}"))
     }
 }
 
@@ -98,7 +171,7 @@ pub struct DSFDataSet {
 pub enum DataSetStatus {
     Healthy,
     Broken,
-    BrokenDpes,
+    BrokenDeps,
     Unverified,
 }
 
@@ -155,7 +228,7 @@ impl DSFDataSet {
             }
             DataSetStatus::Broken
         } else {
-            DataSetStatus::BrokenDpes
+            DataSetStatus::BrokenDeps
         };
 
         let detailed_status = DataSetVerifyRes {
@@ -193,10 +266,10 @@ impl DSFDataSet {
         for entry in &current_tree.entries {
             if let Some(old_hash) = old_map.get(&entry.rel_path) {
                 if old_hash != &entry.hash {
-                    println!("文件哈希变动: {:?}", entry.rel_path);
+                    log::info!("File hash changed: {:?}", entry.rel_path);
                 }
             } else {
-                println!("新增文件: {:?}", entry.rel_path);
+                log::info!("New file: {:?}", entry.rel_path);
             }
         }
     }

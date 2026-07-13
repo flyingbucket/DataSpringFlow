@@ -165,8 +165,8 @@ impl FileMerkleTree {
                     let sub_hash = sub_tree.get_hash()?;
                     hasher.update(&sub_hash);
                 } else {
-                    println!(
-                        "Warning: Symlink points to an unsupported file type at {:?}",
+                    log::warn!(
+                        "Symlink points to an unsupported file type at {:?}",
                         canonical_path
                     );
                     hasher.update(b"[UNKNOWN_TARGET]");
@@ -174,10 +174,7 @@ impl FileMerkleTree {
             }
             // 其他未知类型（如：管道、块设备、字符设备等），打印日志并跳过
             _ => {
-                println!(
-                    "Warning: Skipped unknown file type for entry: {:?}",
-                    entry.rel_path
-                );
+                log::warn!("Skipped unknown file type for entry: {:?}", entry.rel_path);
             }
         }
 

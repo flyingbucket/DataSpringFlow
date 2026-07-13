@@ -1,10 +1,12 @@
 use crate::core::{DSFDataSet, DataSetStatus, DataSetVerifyRes, MetaData};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
+use serde::Serialize;
+use std::fmt;
 
 /// Python binding for DatasetStatus
 #[pyclass(name = "DatasetStatus", eq, eq_int, from_py_object)]
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum PyDataSetStatus {
     Healthy,
     Broken,
@@ -12,12 +14,23 @@ pub enum PyDataSetStatus {
     Unverified,
 }
 
+impl fmt::Debug for PyDataSetStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            PyDataSetStatus::Healthy => "DatasetStatus.Healthy",
+            PyDataSetStatus::Broken => "DatasetStatus.Broken",
+            PyDataSetStatus::BrokenDeps => "DatasetStatus.BrokenDeps",
+            PyDataSetStatus::Unverified => "DatasetStatus.Unverified",
+        };
+        write!(f, "{}", s)
+    }
+}
 impl From<DataSetStatus> for PyDataSetStatus {
     fn from(status: DataSetStatus) -> Self {
         match status {
             DataSetStatus::Healthy => PyDataSetStatus::Healthy,
             DataSetStatus::Broken => PyDataSetStatus::Broken,
-            DataSetStatus::BrokenDpes => PyDataSetStatus::BrokenDeps,
+            DataSetStatus::BrokenDeps => PyDataSetStatus::BrokenDeps,
             DataSetStatus::Unverified => PyDataSetStatus::Unverified,
         }
     }
@@ -28,7 +41,7 @@ impl From<PyDataSetStatus> for DataSetStatus {
         match status {
             PyDataSetStatus::Healthy => DataSetStatus::Healthy,
             PyDataSetStatus::Broken => DataSetStatus::Broken,
-            PyDataSetStatus::BrokenDeps => DataSetStatus::BrokenDpes,
+            PyDataSetStatus::BrokenDeps => DataSetStatus::BrokenDeps,
             PyDataSetStatus::Unverified => DataSetStatus::Unverified,
         }
     }
@@ -50,6 +63,10 @@ impl PyDataSetVerifyRes {
     pub fn new(status: PyDataSetStatus, dep_status: Vec<PyDataSetStatus>) -> Self {
         Self { status, dep_status }
     }
+
+    fn __repr__(&self) -> String {
+        format!("{:#?}", self)
+    }
 }
 
 impl From<DataSetVerifyRes> for PyDataSetVerifyRes {
@@ -63,7 +80,7 @@ impl From<DataSetVerifyRes> for PyDataSetVerifyRes {
 
 /// Python binding for MetaData
 #[pyclass(name = "MetaData", skip_from_py_object)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct PyMetaData {
     #[pyo3(get)]
     pub name: String,
@@ -78,6 +95,8 @@ pub struct PyMetaData {
     #[pyo3(get)]
     pub script_path: String,
     #[pyo3(get)]
+    pub owner: String,
+    #[pyo3(get)]
     pub dependencies: Vec<String>,
     #[pyo3(get)]
     pub merkle_tree_path: String,
@@ -91,12 +110,18 @@ impl PyMetaData {
     }
 
     fn __repr__(&self) -> String {
-        format!(
-            "<MetaData id='{}' path='{}' hash='{}'>",
-            self.id(),
-            self.path,
-            self.hash
-        )
+        serde_json::to_string_pretty(self).unwrap_or_else(|err| {
+            let bt = std::backtrace::Backtrace::capture();
+            log::warn!(
+                "Failed to serialize MetaData to JSON: {}\nBacktrace:\n{}",
+                err,
+                bt
+            );
+            format!(
+                "MetaData(name='{}', error='Failed to serialize on rust side when printing')",
+                self.name
+            )
+        })
     }
 }
 
@@ -109,6 +134,7 @@ impl From<MetaData> for PyMetaData {
             path: meta.path.to_string_lossy().to_string(),
             description_path: meta.description_path.to_string_lossy().to_string(),
             script_path: meta.script_path.to_string_lossy().to_string(),
+            owner: meta.owner,
             dependencies: meta.dependencies,
             merkle_tree_path: meta.merkle_tree_path.to_string_lossy().to_string(),
         }

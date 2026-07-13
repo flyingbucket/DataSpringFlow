@@ -1,0 +1,14 @@
+{
+  "name": "DataSpringFlow-Isolation-Box",
+  "image": "localhost/dsf-dev:latest",
+  // 挂载当前项目目录到容器的 /app
+  "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind,Z",
+  "workspaceFolder": "/app",
+  // Podman 在 Rootless 模式下处理多用户/UID 映射的黄金参数
+  "runArgs": [
+    "--userns=keep-id",
+    "-e", "TERM=xterm-256color"
+  ],
+  // 默认以 root 身份切入容器
+  "remoteUser": "root"
+}

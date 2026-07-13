@@ -25,6 +25,7 @@ mod tests {
                 ds_path.clone(),
                 Some(ds_path.join("desc.md")),
                 ds_path.join("script.py"),
+                None,
                 deps.iter().map(|s| s.to_string()).collect(),
                 ds_path.join("merkle.bin"),
             )

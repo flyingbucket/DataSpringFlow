@@ -1,13 +1,18 @@
+use crate::core::MetaDataError;
 use crate::merkle::HashRes;
+
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
-use colored::*;
 use directories::ProjectDirs;
+use whoami;
 
+#[cfg(feature = "cli")]
 use crate::core::DataSetStatus;
+#[cfg(feature = "cli")]
+use colored::*;
 
 pub fn hashres_to_hex(bytes: HashRes) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
@@ -25,15 +30,16 @@ pub fn is_root() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
 
-#[cfg(not(unix))]
-pub fn is_root() -> bool {
-    false
+pub(crate) fn get_username() -> Result<String, MetaDataError> {
+    whoami::username()
+        .map_err(|e| MetaDataError::OwnerResolveFailed(format!("OS username unavailable: {e}")))
 }
 
 pub(crate) fn to_io_invalid_input(e: anyhow::Error) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
 }
 
+#[cfg(feature = "cli")]
 pub(crate) fn print_query(id: &str, status: DataSetStatus, dep_statuses: &[DataSetStatus]) {
     let s = fmt_query(status);
     println!("dataset: {}", id.cyan());
@@ -47,11 +53,12 @@ pub(crate) fn print_query(id: &str, status: DataSetStatus, dep_statuses: &[DataS
     }
 }
 
+#[cfg(feature = "cli")]
 pub(crate) fn fmt_query(s: DataSetStatus) -> String {
     match s {
         DataSetStatus::Healthy => "Healthy".green().to_string(),
         DataSetStatus::Broken => "Broken".red().to_string(),
-        DataSetStatus::BrokenDpes => "BrokenDeps".yellow().to_string(),
+        DataSetStatus::BrokenDeps => "BrokenDeps".yellow().to_string(),
         DataSetStatus::Unverified => "Unverified".normal().to_string(),
     }
 }
@@ -69,8 +76,7 @@ pub(crate) fn build_default_merkle_path(name: &str, tag: &str) -> Result<PathBuf
     let merkle_dir = ProjectDirs::from("io", "flyingbucket", "dataspringflow")
         .map(|proj| proj.data_dir().join("merkle"))
         .unwrap_or_else(||{
-            println!("{}","Warning: Failed to find OS standard project dir. Using current working dir as a backup.\n 
-                    Check your environment varible $HOME. If using a docker, set env $DSF_CONFIG_PATH and edit that file manully.".yellow().bold());
+            log::warn!("Failed to find OS standard project dir. Using current working dir as a backup. Check your environment varible $HOME.");
             PathBuf::from("./data/merkle")
         });
     fs::create_dir_all(&merkle_dir)?;
