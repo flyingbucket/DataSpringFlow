@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{self, Error, ErrorKind, Write};
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::RwLock;
 
-use dataspringflow_rs::backend::DatasetBackend;
+use dataspringflow_rs::backend::{BackendError, BackendResult, DatasetBackend};
 use dataspringflow_rs::core::MetaData;
 
 /// 纯内存 Mock 后端
@@ -21,21 +21,21 @@ impl MemoryBackend {
 }
 
 impl DatasetBackend for MemoryBackend {
-    fn get_metadata(&self, id: &str) -> io::Result<MetaData> {
+    fn get_metadata(&self, id: &str) -> BackendResult<MetaData> {
         let store = self.store.read().unwrap();
         store
             .get(id)
             .cloned()
-            .ok_or_else(|| Error::new(ErrorKind::NotFound, format!("Mock: ID {} not found", id)))
+            .ok_or_else(|| BackendError::DatasetNotFound { id: id.to_string() })
     }
 
-    fn save_metadata(&self, metadata: &MetaData) -> io::Result<()> {
+    fn save_metadata(&self, metadata: &MetaData) -> BackendResult<()> {
         let mut store = self.store.write().unwrap();
         store.insert(metadata.id(), metadata.clone());
         Ok(())
     }
 
-    fn check_is_referenced(&self, target_id: &str) -> io::Result<Vec<String>> {
+    fn check_is_referenced(&self, target_id: &str) -> BackendResult<Vec<String>> {
         let store = self.store.read().unwrap();
         let mut referrers = Vec::new();
         // 遍历所有元数据，检查谁的 dependencies 包含了 target_id
@@ -47,12 +47,12 @@ impl DatasetBackend for MemoryBackend {
         Ok(referrers)
     }
 
-    fn list_all_metadata(&self) -> io::Result<Vec<MetaData>> {
+    fn list_all_metadata(&self) -> BackendResult<Vec<MetaData>> {
         let store = self.store.read().unwrap();
         Ok(store.values().cloned().collect())
     }
 
-    fn delete_metadata(&self, id: &str) -> io::Result<()> {
+    fn delete_metadata(&self, id: &str) -> BackendResult<()> {
         let mut store = self.store.write().unwrap();
         store.remove(id);
         Ok(())
