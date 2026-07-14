@@ -46,7 +46,6 @@ fn test_service_register_and_query_success() {
         owner_nickname: None,
         dependencies: vec![],
         force_heal: false,
-        yes: false,
     };
 
     // 适配 target_backend: Option<&BackendAddr>
@@ -82,7 +81,6 @@ fn test_service_register_missing_dependency() {
         owner_nickname: Some("john".to_string()),
         dependencies: vec!["ghost_dataset@v1".to_string()], // 依赖不存在
         force_heal: false,
-        yes: false,
     };
 
     let reg_res = service.register(opts, None);
@@ -114,7 +112,6 @@ fn test_service_delete_with_reference_protection() {
                 owner_nickname: Some("Mick".to_string()),
                 dependencies: vec![],
                 force_heal: false,
-                yes: false,
             },
             None,
         )
@@ -133,7 +130,6 @@ fn test_service_delete_with_reference_protection() {
                 owner_nickname: Some("Mick".to_string()),
                 dependencies: vec!["base@v1".to_string()],
                 force_heal: false,
-                yes: false,
             },
             None,
         )
@@ -177,7 +173,6 @@ fn test_service_check_is_referenced_returns_referrers() {
                 owner_nickname: None,
                 dependencies: vec![],
                 force_heal: false,
-                yes: false,
             },
             None,
         )
@@ -195,7 +190,6 @@ fn test_service_check_is_referenced_returns_referrers() {
                 owner_nickname: None,
                 dependencies: vec!["base@v1".to_string()],
                 force_heal: false,
-                yes: false,
             },
             None,
         )
@@ -227,7 +221,6 @@ fn test_service_verify_deep_and_self() {
                 owner_nickname: None,
                 dependencies: vec![],
                 force_heal: false,
-                yes: false,
             },
             None,
         )
