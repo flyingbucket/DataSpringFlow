@@ -1,5 +1,5 @@
-use crate::backend::{BackendError, BackendResult};
-use crate::backend::{DatasetBackend, DynBackend, RemoteBackend, SqliteBackend, SqliteConfig};
+use crate::backend::{BackendError, BackendRef, BackendResult};
+use crate::backend::{DatasetBackend, RemoteBackend, SqliteBackend, SqliteConfig};
 use crate::config::AppConfig;
 use crate::core::{MetaData, MetaDataError};
 use crate::utils::get_username;
@@ -93,14 +93,17 @@ pub struct ScopedId(pub BackendAddr, pub String);
 
 pub struct StackedBackend {
     cfg: StackedBackendConfig,
+    private_be: SqliteBackend,
     reachable_global_be: Vec<(GlobalBackendAddr, GlobalBackend)>,
 }
 
 impl StackedBackend {
     pub fn new(cfg: StackedBackendConfig) -> BackendResult<Self> {
         let reachable_global_be = StackedBackend::resolve_all_global_idiomatic(&cfg)?;
+        let private_be = SqliteBackend::new(cfg.private_sqlite_cfg.clone())?;
         Ok(Self {
             cfg,
+            private_be,
             reachable_global_be,
         })
     }
@@ -133,16 +136,12 @@ impl StackedBackend {
         Ok(all_global)
     }
 
-    pub fn get_backend_by_addr(
-        &self,
+    pub fn get_backend_by_addr<'a>(
+        &'a self,
         target_backend: Option<&BackendAddr>,
-    ) -> BackendResult<DynBackend> {
+    ) -> BackendResult<BackendRef<'a>> {
         match target_backend {
-            None | Some(BackendAddr::Private { .. }) => {
-                let private_be = SqliteBackend::new(self.cfg.private_sqlite_cfg.clone())?;
-                Ok(Box::new(private_be))
-            }
-
+            None | Some(BackendAddr::Private { .. }) => Ok(&self.private_be as BackendRef<'a>),
             Some(BackendAddr::Global { addr }) => {
                 // 在预筛过的可达列表里查找对应的已解析后端
                 let found_backend = self
@@ -152,15 +151,7 @@ impl StackedBackend {
                     .map(|(_, be)| be);
 
                 match found_backend {
-                    Some(GlobalBackend::Sqlite(_sqlite_be)) => {
-                        // 本地全局的 Sqlite，重新 new 一个物理后端实例以获得所有权
-                        let backend = addr.resolve_to_backend()?;
-                        if let GlobalBackend::Sqlite(sqlite_be) = backend {
-                            Ok(Box::new(sqlite_be))
-                        } else {
-                            unreachable!();
-                        }
-                    }
+                    Some(GlobalBackend::Sqlite(sqlite_be)) => Ok(sqlite_be as BackendRef<'a>),
                     Some(GlobalBackend::Remote(_remote_be)) => Err(BackendError::Unsupported {
                         message: "Remote backend is currently unimplemented".to_string(),
                     }),
@@ -223,7 +214,7 @@ impl StackedBackend {
         target_backend: Option<&BackendAddr>,
     ) -> BackendResult<()> {
         let backend_handel = self.get_backend_by_addr(target_backend)?;
-        backend_handel.as_ref().save_metadata(metadata)
+        backend_handel.save_metadata(metadata)
     }
 
     /// Checks if any datasets ON THIS SERVER depend on the specified `target_id`.

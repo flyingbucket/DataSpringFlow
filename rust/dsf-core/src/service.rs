@@ -63,15 +63,15 @@ impl DSFService {
             &opts.name,
             &opts.tag,
             &opts.dependencies,
-            backend_handel.as_ref(),
+            backend_handel,
         )?;
         graph.check_cycle()?;
 
         // 依赖健康检查
         let mut broken = Vec::new();
         for dep_id in &opts.dependencies {
-            let mut ds = DSFDataSet::load_from_id(dep_id, backend_handel.as_ref())?;
-            let res = ds.verify(backend_handel.as_ref(), false)?;
+            let mut ds = DSFDataSet::load_from_id(dep_id, backend_handel)?;
+            let res = ds.verify(backend_handel, false)?;
             if res.status != DataSetStatus::Healthy {
                 broken.push(dep_id.clone());
             }
@@ -87,8 +87,8 @@ impl DSFService {
             }
 
             for dep_id in &broken {
-                let mut ds = DSFDataSet::load_from_id(dep_id, backend_handel.as_ref())?;
-                ds.refresh_and_commit(backend_handel.as_ref())?;
+                let mut ds = DSFDataSet::load_from_id(dep_id, backend_handel)?;
+                ds.refresh_and_commit(backend_handel)?;
             }
         }
 
@@ -113,8 +113,8 @@ impl DSFService {
     pub fn update_merkle(&self, id: &str, target_backend: Option<&BackendAddr>) -> Result<()> {
         validate_dataset_id(id)?;
         let backend_handel = self.backend.get_backend_by_addr(target_backend)?;
-        let mut ds = DSFDataSet::load_from_id(id, backend_handel.as_ref())?;
-        ds.refresh_and_commit(backend_handel.as_ref())?;
+        let mut ds = DSFDataSet::load_from_id(id, backend_handel)?;
+        ds.refresh_and_commit(backend_handel)?;
         Ok(())
     }
 
@@ -127,7 +127,7 @@ impl DSFService {
     ) -> Result<()> {
         validate_dataset_id(id)?;
         let backend_handel = self.backend.get_backend_by_addr(target_backend)?;
-        let backend_ref = backend_handel.as_ref();
+        let backend_ref = backend_handel;
         if !force {
             let referrers = backend_ref
                 .check_is_referenced(id)
@@ -162,7 +162,7 @@ impl DSFService {
             .backend
             .get_backend_by_addr(target_backend)
             .map_err(|e| e.to_dag_error())?;
-        let backend_ref = backend_handel.as_ref();
+        let backend_ref = backend_handel;
         let mut ds = DSFDataSet::load_from_id(id, backend_ref)?;
         ds.verify(backend_ref, show_diff)
     }
@@ -176,7 +176,7 @@ impl DSFService {
     ) -> Result<DataSetVerifyRes> {
         validate_dataset_id(id)?;
         let backend_handel = self.backend.get_backend_by_addr(target_backend)?;
-        let backend_ref = backend_handel.as_ref();
+        let backend_ref = backend_handel;
         let mut ds = DSFDataSet::load_from_id(id, backend_ref)?;
         Ok(ds.verify_single(show_diff, &[])?)
     }
