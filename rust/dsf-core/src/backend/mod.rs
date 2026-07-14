@@ -1,5 +1,5 @@
 use crate::config::AppConfig;
-use crate::core::{MetaData, MetaDataError};
+use crate::core::{DataSetBusyStatus, MetaData, MetaDataError};
 use crate::dag::DatasetGraphError;
 
 use std::io;
@@ -20,6 +20,9 @@ pub use router::{
 pub trait DatasetBackend {
     /// Retrieves the corresponding metadata by the dataset ID.
     fn get_metadata(&self, id: &str) -> BackendResult<MetaData>;
+
+    /// Mark MetaData status to ensure disk data and backend metadata consistency
+    fn mark_status(&self, id: &str, status: DataSetBusyStatus) -> BackendResult<()>;
     /// Saves or updates the dataset metadata.
     fn save_metadata(&self, metadata: &MetaData) -> BackendResult<()>;
     /// Checks if any datasets depend on the specified `target_id`.

@@ -55,7 +55,6 @@ class TestDSFService(unittest.TestCase):
                 description_path=self.dummy_desc,
                 target_backend=self.backend,
                 force_heal=False,
-                yes=True,
             )
         except Exception as e:
             self.fail(f"register 抛出了非预期的异常: {e}")
@@ -72,7 +71,7 @@ class TestDSFService(unittest.TestCase):
         )
 
         # 测试 query_meta
-        scoped_metas = self.service.query_meta(self.dataset_id)
+        scoped_metas = self.service.query_meta(self.dataset_id, None)
         self.assertIsInstance(scoped_metas, list)
         self.assertGreater(len(scoped_metas), 0)
 

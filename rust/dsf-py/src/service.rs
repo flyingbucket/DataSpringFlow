@@ -27,16 +27,22 @@ impl PyDSFService {
     }
 
     /// Query metadata for a specific dataset ID (e.g., "imagenet@v1.0")
-    pub fn query_meta(&self, id: &str) -> PyResult<Vec<PyScopedMetaData>> {
+    #[pyo3(signature = (id, target_backend=None))]
+    pub fn query_meta(
+        &self,
+        id: &str,
+        target_backend: Option<PyBackendAddr>,
+    ) -> PyResult<Vec<PyScopedMetaData>> {
+        let backend_ref = target_backend.as_ref().map(|py_addr| &py_addr.inner);
         let meta = self
             .inner
-            .query_meta(id)
+            .query_meta(id, backend_ref)
             .map_err(|e| PyIOError::new_err(e.to_string()))?;
         Ok(meta.to_py_vec())
     }
 
     /// Register a new dataset with full options
-    #[pyo3(signature = (name, tag, path, script_path, owner_nickname=None,dependencies=None, description_path=None, target_backend=None,force_heal=false, yes=false))]
+    #[pyo3(signature = (name, tag, path, script_path, owner_nickname=None,dependencies=None, description_path=None, target_backend=None,force_heal=false))]
     #[allow(clippy::too_many_arguments)]
     pub fn register(
         &self,
@@ -49,7 +55,6 @@ impl PyDSFService {
         description_path: Option<String>,
         target_backend: Option<PyBackendAddr>,
         force_heal: bool,
-        yes: bool,
     ) -> PyResult<()> {
         let opts = RegisterOptions {
             name,
@@ -60,7 +65,6 @@ impl PyDSFService {
             owner_nickname,
             dependencies: dependencies.unwrap_or_default(),
             force_heal,
-            yes,
         };
         let backend_ref = target_backend.as_ref().map(|py_addr| &py_addr.inner);
         self.inner

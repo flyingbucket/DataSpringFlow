@@ -89,7 +89,6 @@ class TestDSFServiceEndpoints(unittest.TestCase):
                 description_path=None,
                 target_backend=None,  # 映射自 PyBackendAddr
                 force_heal=False,
-                yes=True,
             )
 
     def test_service_update_merkle_signature(self):

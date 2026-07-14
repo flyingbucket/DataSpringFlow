@@ -1,4 +1,4 @@
-use dsf_core::core::{DSFDataSet, DataSetStatus, DataSetVerifyRes, MetaData};
+use dsf_core::core::{DSFDataSet, DataSetBusyStatus, DataSetStatus, DataSetVerifyRes, MetaData};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use serde::Serialize;
@@ -12,6 +12,10 @@ pub enum PyDataSetStatus {
     Broken,
     BrokenDeps,
     Unverified,
+    BusyReading,
+    BusyModifying,
+    BusyDeleting,
+    BusyCreating,
 }
 
 impl fmt::Debug for PyDataSetStatus {
@@ -21,10 +25,16 @@ impl fmt::Debug for PyDataSetStatus {
             PyDataSetStatus::Broken => "DatasetStatus.Broken",
             PyDataSetStatus::BrokenDeps => "DatasetStatus.BrokenDeps",
             PyDataSetStatus::Unverified => "DatasetStatus.Unverified",
+            PyDataSetStatus::BusyReading => "DatasetStatus.BusyReading",
+            PyDataSetStatus::BusyModifying => "DatasetStatus.BusyModifying",
+            PyDataSetStatus::BusyDeleting => "DatasetStatus.BusyDeleting",
+            PyDataSetStatus::BusyCreating => "DatasetStatus.BusyCreating",
         };
         write!(f, "{}", s)
     }
 }
+
+// 从 Rust 的核心状态转换为 Python 状态
 impl From<DataSetStatus> for PyDataSetStatus {
     fn from(status: DataSetStatus) -> Self {
         match status {
@@ -32,10 +42,18 @@ impl From<DataSetStatus> for PyDataSetStatus {
             DataSetStatus::Broken => PyDataSetStatus::Broken,
             DataSetStatus::BrokenDeps => PyDataSetStatus::BrokenDeps,
             DataSetStatus::Unverified => PyDataSetStatus::Unverified,
+            // 优雅的解包匹配：将嵌套的 Rust enum 映射成平铺的 Python 枚举
+            DataSetStatus::Busy(busy) => match busy {
+                DataSetBusyStatus::Reading => PyDataSetStatus::BusyReading,
+                DataSetBusyStatus::Modifying => PyDataSetStatus::BusyModifying,
+                DataSetBusyStatus::Deleting => PyDataSetStatus::BusyDeleting,
+                DataSetBusyStatus::Creating => PyDataSetStatus::BusyCreating,
+            },
         }
     }
 }
 
+// 从 Python 状态还原为 Rust 核心状态
 impl From<PyDataSetStatus> for DataSetStatus {
     fn from(status: PyDataSetStatus) -> Self {
         match status {
@@ -43,6 +61,54 @@ impl From<PyDataSetStatus> for DataSetStatus {
             PyDataSetStatus::Broken => DataSetStatus::Broken,
             PyDataSetStatus::BrokenDeps => DataSetStatus::BrokenDeps,
             PyDataSetStatus::Unverified => DataSetStatus::Unverified,
+            // 优雅的重新打包：将平铺的分支重新折叠回带数据的变体
+            PyDataSetStatus::BusyReading => DataSetStatus::Busy(DataSetBusyStatus::Reading),
+            PyDataSetStatus::BusyModifying => DataSetStatus::Busy(DataSetBusyStatus::Modifying),
+            PyDataSetStatus::BusyDeleting => DataSetStatus::Busy(DataSetBusyStatus::Deleting),
+            PyDataSetStatus::BusyCreating => DataSetStatus::Busy(DataSetBusyStatus::Creating),
+        }
+    }
+}
+/// Python binding for DataSetBusyStatus
+#[pyclass(name = "DataSetBusyStatus", eq, eq_int, from_py_object)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PyDataSetBusyStatus {
+    Reading,
+    Modifying,
+    Deleting,
+    Creating,
+}
+
+impl fmt::Debug for PyDataSetBusyStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            PyDataSetBusyStatus::Reading => "DataSetBusyStatus.Reading",
+            PyDataSetBusyStatus::Modifying => "DataSetBusyStatus.Modifying",
+            PyDataSetBusyStatus::Deleting => "DataSetBusyStatus.Deleting",
+            PyDataSetBusyStatus::Creating => "DataSetBusyStatus.Creating",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+impl From<DataSetBusyStatus> for PyDataSetBusyStatus {
+    fn from(busy: DataSetBusyStatus) -> Self {
+        match busy {
+            DataSetBusyStatus::Reading => PyDataSetBusyStatus::Reading,
+            DataSetBusyStatus::Modifying => PyDataSetBusyStatus::Modifying,
+            DataSetBusyStatus::Deleting => PyDataSetBusyStatus::Deleting,
+            DataSetBusyStatus::Creating => PyDataSetBusyStatus::Creating,
+        }
+    }
+}
+
+impl From<PyDataSetBusyStatus> for DataSetBusyStatus {
+    fn from(busy: PyDataSetBusyStatus) -> Self {
+        match busy {
+            PyDataSetBusyStatus::Reading => DataSetBusyStatus::Reading,
+            PyDataSetBusyStatus::Modifying => DataSetBusyStatus::Modifying,
+            PyDataSetBusyStatus::Deleting => DataSetBusyStatus::Deleting,
+            PyDataSetBusyStatus::Creating => DataSetBusyStatus::Creating,
         }
     }
 }

@@ -82,9 +82,6 @@ pub enum Commands {
         /// Non-interactive mode: force heal when broken dependencies are detected
         #[arg(long, default_value_t = false)]
         force_heal: bool,
-        /// Non-interactive confirmation (skip prompts)
-        #[arg(long, default_value_t = false)]
-        yes: bool,
         /// Register dataset directly to the global public registry
         #[arg(long, default_value_t = false)]
         global: bool,
@@ -138,7 +135,6 @@ pub fn run(cli: Cli) -> Result<()> {
             description_path,
             dependencies,
             force_heal,
-            yes,
             global,
         } => {
             let opts = RegisterOptions {
@@ -150,7 +146,6 @@ pub fn run(cli: Cli) -> Result<()> {
                 description_path,
                 dependencies,
                 force_heal,
-                yes,
             };
             handle_register(opts, global)
         }
@@ -282,7 +277,8 @@ fn init_user() -> Result<()> {
     fs::create_dir_all(data_dir.join("merkle")).context("Failed to create user data dir")?;
     fs::create_dir_all(data_dir.join("descriptions")).context("Failed to create user data dir")?;
 
-    let sqlite_cfg = SqliteConfig::new(data_dir.join("dsf.db"));
+    let mut sqlite_cfg = SqliteConfig::new(data_dir.join("dsf.db"));
+    sqlite_cfg.wal = true;
 
     // Detect if global is installed to automatically mount it in StackedBackend
     let mut global_repos = vec![];
@@ -469,7 +465,7 @@ fn handle_query(id: &str, level: VerifyLevel, show_diff: bool, global: bool) -> 
 
     match level {
         VerifyLevel::MetaOnly => {
-            let meta_results = service.query_meta(id);
+            let meta_results = service.query_meta(id, None);
             match meta_results {
                 Ok(metas) => {
                     for scoped_meta in metas {
@@ -521,7 +517,7 @@ fn handle_update(id: &str, global: bool) -> Result<()> {
 
     service.update_merkle(id, target.as_ref())?;
 
-    let metas = service.query_meta(id)?;
+    let metas = service.query_meta(id, None)?;
     if let Some(meta) = metas.first() {
         println!(
             "{}",
@@ -536,7 +532,7 @@ fn handle_delete(id: &str, force: bool, yes: bool, global: bool) -> Result<()> {
     let target = get_target_addr(global);
 
     if !yes {
-        let metas = service.query_meta(id)?;
+        let metas = service.query_meta(id, None)?;
         if let Some(meta_to_delete) = metas.first() {
             let m = &meta_to_delete.1;
             let scope_str = if global {

@@ -50,6 +50,7 @@ pub struct MetaData {
     pub owner: String,
     pub dependencies: Vec<String>,
     pub merkle_tree_path: PathBuf,
+    pub busy_status: Option<DataSetBusyStatus>,
 }
 
 impl MetaData {
@@ -66,6 +67,7 @@ impl MetaData {
         owner_nickname: Option<String>,
         dependencies: Vec<String>,
         merkle_tree_path: PathBuf,
+        busy_status: Option<DataSetBusyStatus>,
     ) -> Result<Self, MetaDataError> {
         if name.contains('@') {
             return Err(MetaDataError::InvalidName(
@@ -116,6 +118,7 @@ impl MetaData {
             owner,
             dependencies,
             merkle_tree_path,
+            busy_status,
         })
     }
 
@@ -173,6 +176,43 @@ pub enum DataSetStatus {
     Broken,
     BrokenDeps,
     Unverified,
+    Busy(DataSetBusyStatus),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataSetBusyStatus {
+    Reading,
+    Modifying,
+    Deleting,
+    Creating,
+}
+impl DataSetBusyStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DataSetBusyStatus::Reading => "reading",
+            DataSetBusyStatus::Modifying => "modifying",
+            DataSetBusyStatus::Deleting => "deleting",
+            DataSetBusyStatus::Creating => "creating",
+        }
+    }
+}
+impl fmt::Display for DataSetBusyStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+impl std::str::FromStr for DataSetBusyStatus {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "reading" => Ok(DataSetBusyStatus::Reading),
+            "modifying" => Ok(DataSetBusyStatus::Modifying),
+            "deleting" => Ok(DataSetBusyStatus::Deleting),
+            "creating" => Ok(DataSetBusyStatus::Creating),
+            _ => Err(()),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -211,6 +251,17 @@ impl DSFDataSet {
         show_diff: bool,
         dep_statuses: &[DataSetStatus],
     ) -> io::Result<DataSetVerifyRes> {
+        if let Some(busy) = self.metadata.busy_status
+            && busy != DataSetBusyStatus::Reading
+        {
+            let detailed_status = DataSetVerifyRes {
+                status: DataSetStatus::Busy(busy),
+                dep_status: dep_statuses.to_vec(),
+            };
+            self.detailed_status = detailed_status.clone();
+            return Ok(detailed_status);
+        }
+
         let mut curr_merkle = FileMerkleTree::new(self.metadata.path.clone())?;
         let curr_hash = hashres_to_hex(curr_merkle.get_hash()?);
 

@@ -1,5 +1,5 @@
 use crate::backend::{BackendError, BackendResult, DatasetBackend, capture_backtrace};
-use crate::core::MetaData;
+use crate::core::{DataSetBusyStatus, MetaData};
 use r2d2::Pool;
 use r2d2::PooledConnection;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -170,7 +170,8 @@ impl SqliteBackend {
                 script_path       TEXT NOT NULL,
                 owner             TEXT NOT NULL,
                 dependencies_json TEXT NOT NULL,
-                merkle_tree_path  TEXT NOT NULL
+                merkle_tree_path  TEXT NOT NULL,
+                busy_status       TEXT DEFAULT NULL
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_datasets_name_tag
@@ -187,13 +188,40 @@ impl SqliteBackend {
 }
 
 impl DatasetBackend for SqliteBackend {
+    fn mark_status(&self, id: &str, status: DataSetBusyStatus) -> BackendResult<()> {
+        let mut conn = self.conn()?;
+
+        let tx = conn
+            .transaction()
+            .map_err(|e| BackendError::StorageError { source: e })?;
+
+        let status_str = status.as_str();
+
+        //TODO: if rows_affected>1, fatual error happened in sqlite database db file
+        let rows_affected = tx
+            .execute(
+                "UPDATE datasets SET busy_status = ?1 WHERE id = ?2",
+                rusqlite::params![status_str, id],
+            )
+            .map_err(|e| BackendError::StorageError { source: e })?;
+
+        if rows_affected == 0 {
+            capture_backtrace();
+            return Err(BackendError::DatasetNotFound { id: id.to_string() });
+        }
+
+        tx.commit()
+            .map_err(|e| BackendError::StorageError { source: e })?;
+
+        Ok(())
+    }
     fn get_metadata(&self, id: &str) -> BackendResult<MetaData> {
         let conn = self.conn()?;
 
         let raw_data = conn
         .query_row(
             r#"
-            SELECT name, tag, hash, path, description_path, script_path, owner, dependencies_json, merkle_tree_path
+            SELECT name, tag, hash, path, description_path, script_path, owner, dependencies_json, merkle_tree_path, busy_status
             FROM datasets WHERE id = ?1
             "#,
             params![id],
@@ -208,13 +236,13 @@ impl DatasetBackend for SqliteBackend {
                     row.get::<_, String>(6)?,
                     row.get::<_, String>(7)?, // dependencies_json
                     row.get::<_, String>(8)?,
+                    row.get::<_, Option<String>>(9)?,
                 ))
             },
         )
         .optional()
         .map_err(BackendError::from)?;
 
-        // 3. 检查数据是否存在
         let (
             name,
             tag,
@@ -225,11 +253,18 @@ impl DatasetBackend for SqliteBackend {
             owner,
             dependencies_json,
             merkle_tree_path,
+            busy_status_str,
         ) = raw_data.ok_or_else(|| {
             capture_backtrace();
             BackendError::DatasetNotFound { id: id.to_string() }
         })?;
 
+        let busy_status = busy_status_str.and_then(|s| {
+            s.parse::<DataSetBusyStatus>().ok().or_else(|| {
+                log::error!("Unknown busy status from database: {}", s);
+                None
+            })
+        });
         let dependencies: Vec<String> = serde_json::from_str(&dependencies_json).map_err(|e| {
             capture_backtrace();
             BackendError::SerializationError {
@@ -247,12 +282,14 @@ impl DatasetBackend for SqliteBackend {
             owner,
             dependencies,
             merkle_tree_path: PathBuf::from(merkle_tree_path),
+            busy_status,
         })
     }
 
     fn save_metadata(&self, metadata: &MetaData) -> BackendResult<()> {
         let mut conn = self.conn()?;
 
+        let busy_status_str = metadata.busy_status.map(|s| s.as_str());
         let deps_json = serde_json::to_string(&metadata.dependencies).map_err(|e| {
             capture_backtrace();
             BackendError::SerializationError {
@@ -268,8 +305,8 @@ impl DatasetBackend for SqliteBackend {
         tx.execute(
             r#"
             INSERT INTO datasets (
-                id, name, tag, hash, path, description_path, script_path, owner, dependencies_json, merkle_tree_path
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                id, name, tag, hash, path, description_path, script_path, owner, dependencies_json, merkle_tree_path, busy_status
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 tag = excluded.tag,
@@ -279,7 +316,8 @@ impl DatasetBackend for SqliteBackend {
                 script_path = excluded.script_path,
                 owner = excluded.owner,
                 dependencies_json = excluded.dependencies_json,
-                merkle_tree_path = excluded.merkle_tree_path
+                merkle_tree_path = excluded.merkle_tree_path,
+                busy_status = excluded.busy_status
             "#,
             params![
                 metadata.id(),
@@ -292,6 +330,7 @@ impl DatasetBackend for SqliteBackend {
                 metadata.owner,
                 deps_json,
                 metadata.merkle_tree_path.to_string_lossy(),
+                busy_status_str,
             ],
         )?;
 
@@ -332,7 +371,7 @@ impl DatasetBackend for SqliteBackend {
         let mut stmt = conn
             .prepare(
                 r#"
-                SELECT name, tag, hash, path, description_path, script_path, owner, dependencies_json, merkle_tree_path
+                SELECT name, tag, hash, path, description_path, script_path, owner, dependencies_json, merkle_tree_path, busy_status
                 FROM datasets
                 "#,
             )
@@ -350,6 +389,7 @@ impl DatasetBackend for SqliteBackend {
                 let owner: String = row.get(6)?;
                 let dependencies_json: String = row.get(7)?;
                 let merkle_tree_path: String = row.get(8)?;
+                let busy_status_str: Option<String> = row.get(9)?;
 
                 // 反序列化 JSON 依赖树数组
                 let dependencies: Vec<String> =
@@ -360,7 +400,12 @@ impl DatasetBackend for SqliteBackend {
                             Box::new(e),
                         )
                     })?;
-
+                let busy_status = busy_status_str.and_then(|s| {
+                    s.parse::<DataSetBusyStatus>().ok().or_else(|| {
+                        log::error!("Unknown busy status from database: {}", s);
+                        None
+                    })
+                });
                 Ok(MetaData {
                     name,
                     tag,
@@ -371,11 +416,11 @@ impl DatasetBackend for SqliteBackend {
                     owner,
                     dependencies,
                     merkle_tree_path: PathBuf::from(merkle_tree_path),
+                    busy_status,
                 })
             })
             .map_err(|e| io::Error::other(format!("query_map all metadata failed: {e}")))?;
 
-        // 收集迭代器中的结果，并把可能存在的错误（如中间某行反序列化失败）向上抛出
         let mut all_metadata = Vec::new();
         for meta_res in metadata_iter {
             all_metadata.push(
@@ -394,6 +439,7 @@ impl DatasetBackend for SqliteBackend {
             .transaction()
             .map_err(|e| io::Error::other(format!("begin delete transaction failed: {e}")))?;
 
+        //TODO: if rows_affected>1, fatual error happened in sqlite database db file
         let rows_affected = tx
             .execute("DELETE FROM datasets WHERE id = ?1", params![id])
             .map_err(|e| io::Error::other(format!("execute delete statement failed: {e}")))?;
