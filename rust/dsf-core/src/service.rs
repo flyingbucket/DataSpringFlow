@@ -22,7 +22,6 @@ pub struct RegisterOptions {
     pub owner_nickname: Option<String>,
     pub dependencies: Vec<String>,
     pub force_heal: bool,
-    pub yes: bool,
 }
 
 impl DSFService {
@@ -79,7 +78,7 @@ impl DSFService {
 
         // 依赖异常且要求强制heal TODO:
         if !broken.is_empty() {
-            if !(opts.force_heal || opts.yes) {
+            if !(opts.force_heal) {
                 bail!(
                     "Unhealthy dependencies found:\n {:?}. \nRe-run with force_heal/yes to ignore broken deps.",
                     broken

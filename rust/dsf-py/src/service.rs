@@ -36,7 +36,7 @@ impl PyDSFService {
     }
 
     /// Register a new dataset with full options
-    #[pyo3(signature = (name, tag, path, script_path, owner_nickname=None,dependencies=None, description_path=None, target_backend=None,force_heal=false, yes=false))]
+    #[pyo3(signature = (name, tag, path, script_path, owner_nickname=None,dependencies=None, description_path=None, target_backend=None,force_heal=false))]
     #[allow(clippy::too_many_arguments)]
     pub fn register(
         &self,
@@ -49,7 +49,6 @@ impl PyDSFService {
         description_path: Option<String>,
         target_backend: Option<PyBackendAddr>,
         force_heal: bool,
-        yes: bool,
     ) -> PyResult<()> {
         let opts = RegisterOptions {
             name,
@@ -60,7 +59,6 @@ impl PyDSFService {
             owner_nickname,
             dependencies: dependencies.unwrap_or_default(),
             force_heal,
-            yes,
         };
         let backend_ref = target_backend.as_ref().map(|py_addr| &py_addr.inner);
         self.inner

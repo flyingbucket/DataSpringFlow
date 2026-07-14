@@ -82,9 +82,6 @@ pub enum Commands {
         /// Non-interactive mode: force heal when broken dependencies are detected
         #[arg(long, default_value_t = false)]
         force_heal: bool,
-        /// Non-interactive confirmation (skip prompts)
-        #[arg(long, default_value_t = false)]
-        yes: bool,
         /// Register dataset directly to the global public registry
         #[arg(long, default_value_t = false)]
         global: bool,
@@ -138,7 +135,6 @@ pub fn run(cli: Cli) -> Result<()> {
             description_path,
             dependencies,
             force_heal,
-            yes,
             global,
         } => {
             let opts = RegisterOptions {
@@ -150,7 +146,6 @@ pub fn run(cli: Cli) -> Result<()> {
                 description_path,
                 dependencies,
                 force_heal,
-                yes,
             };
             handle_register(opts, global)
         }

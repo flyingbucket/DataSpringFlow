@@ -80,7 +80,6 @@ class DSFService:
         description_path: Optional[str] = None,
         target_backend: Optional[BackendAddr] = None,
         force_heal: bool = False,
-        yes: bool = False,
     ) -> None:
         """Register a new dataset with full options"""
         ...
