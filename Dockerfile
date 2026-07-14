@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     tree \
     ripgrep \
     curl \
+    unzip \
     build-essential \
     python3-dev \
     python3-pip \
@@ -20,7 +21,7 @@ RUN apt-get update && apt-get install -y \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# 安装 maturin 编译工具 (全局环境)
+# 安装 maturin 编译工具
 RUN pip3 install --break-system-packages maturin
 
 # 创建带有独立家目录的两个普通用户
@@ -51,4 +52,5 @@ RUN echo "source /etc/bash.bashrc" >> /root/.bashrc && \
 
 # 设置工作目录
 WORKDIR /app
+ENV CARGO_TARGET_DIR="/app/rust/target_container_dev"
 CMD ["/bin/bash"]
