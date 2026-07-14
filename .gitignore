@@ -9,7 +9,9 @@
 .envrc
 
 # rust
-rust/target*/
+rust/target/
+rust/target_container_release/ 
+rust/target_container_dev/
 rust/*/target
 rust/*/Cargo.lock
 
