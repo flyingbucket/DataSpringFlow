@@ -52,7 +52,7 @@ pub fn validate_dataset_id(id: &str) -> Result<()> {
 
 pub fn ensure_exists(p: &Path, arg_name: &str) -> Result<()> {
     if !p.exists() {
-        bail!("{} dataset path doesn't exist: {}", arg_name, p.display());
+        bail!("{} path doesn't exist: {}", arg_name, p.display());
     }
     Ok(())
 }

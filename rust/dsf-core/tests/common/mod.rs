@@ -21,6 +21,23 @@ impl MemoryBackend {
 }
 
 impl DatasetBackend for MemoryBackend {
+    fn mark_status(
+        &self,
+        id: &str,
+        status: dsf_core::core::DataSetBusyStatus,
+    ) -> BackendResult<()> {
+        // 1. 获取写锁以安全修改内存中的 HashMap
+        let mut store = self.store.write().unwrap();
+
+        // 2. 尝试获取可变引用，并精准对齐底层 Sqlite 驱动的契约行为
+        if let Some(metadata) = store.get_mut(id) {
+            metadata.busy_status = Some(status);
+            Ok(())
+        } else {
+            // 契约对齐：若 ID 不存在，严格返回 DatasetNotFound
+            Err(BackendError::DatasetNotFound { id: id.to_string() })
+        }
+    }
     fn get_metadata(&self, id: &str) -> BackendResult<MetaData> {
         let store = self.store.read().unwrap();
         store

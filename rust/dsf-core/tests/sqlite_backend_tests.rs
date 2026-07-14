@@ -16,6 +16,7 @@ fn create_dummy_metadata(name: &str, tag: &str) -> MetaData {
         owner: "mockuser$nobody".to_string(),
         dependencies: vec!["base_dataset@v1.0".to_string(), "labels@v2.0".to_string()],
         merkle_tree_path: PathBuf::from(format!("/mock/merkle/{}.bincode", name)),
+        busy_status: None,
     }
 }
 
@@ -170,4 +171,68 @@ fn test_list_all_metadata_or_empty() {
     let names: Vec<String> = all_datasets.iter().map(|m| m.name.clone()).collect();
     assert!(names.contains(&"coco".to_string()));
     assert!(names.contains(&"voc".to_string()));
+}
+
+#[test]
+fn test_mark_status_success_and_overwrite() {
+    // use dsf_core::backend::BackendError;
+    use dsf_core::core::DataSetBusyStatus;
+
+    let dir = tempdir().unwrap();
+    let cfg = SqliteConfig::new(dir.path().join("test_status.db"));
+    let backend = SqliteBackend::new(cfg).unwrap();
+
+    let meta = create_dummy_metadata("imagenet", "v21");
+    let id = meta.id();
+
+    // 先存入一条初始状态为 None 的元数据
+    backend.save_metadata(&meta).expect("初始数据保存失败");
+
+    // 1. 验证初始状态为 None
+    let fetched = backend.get_metadata(&id).unwrap();
+    assert_eq!(fetched.busy_status, None);
+
+    // 2. 测试成功标记为 Reading 状态
+    backend
+        .mark_status(&id, DataSetBusyStatus::Reading)
+        .expect("标记 Reading 失败");
+    let fetched_reading = backend.get_metadata(&id).unwrap();
+    assert_eq!(
+        fetched_reading.busy_status,
+        Some(DataSetBusyStatus::Reading)
+    );
+
+    // 3. 测试状态覆盖切换：从 Reading 变更为 Deleting
+    backend
+        .mark_status(&id, DataSetBusyStatus::Deleting)
+        .expect("覆盖标记 Deleting 失败");
+    let fetched_deleting = backend.get_metadata(&id).unwrap();
+    assert_eq!(
+        fetched_deleting.busy_status,
+        Some(DataSetBusyStatus::Deleting)
+    );
+}
+
+#[test]
+fn test_mark_status_not_found() {
+    use dsf_core::backend::BackendError;
+    use dsf_core::core::DataSetBusyStatus;
+
+    let dir = tempdir().unwrap();
+    let cfg = SqliteConfig::new(dir.path().join("test_status_err.db"));
+    let backend = SqliteBackend::new(cfg).unwrap();
+
+    let fake_id = "non_existent_dataset@v1.0";
+
+    // 尝试为一个不存在的 ID 打标状态
+    let res = backend.mark_status(fake_id, DataSetBusyStatus::Modifying);
+
+    // 断言：必须返回指定的 DatasetNotFound 错误
+    assert!(res.is_err(), "对不存在的数据集打标应该报错");
+    match res.unwrap_err() {
+        BackendError::DatasetNotFound { id } => {
+            assert_eq!(id, fake_id, "报错返回的 ID 与预期不一致");
+        }
+        other => panic!(r#"预期返回 DatasetNotFound，但实际得到了: {:?}"#, other),
+    }
 }

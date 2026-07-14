@@ -1,4 +1,5 @@
 use crate::backend::{BackendResult, DatasetBackend};
+use crate::core::DataSetBusyStatus;
 use serde::{Deserialize, Serialize};
 
 pub struct RemoteBackend {}
@@ -16,6 +17,11 @@ impl DatasetBackend for RemoteBackend {
         todo!()
     }
 
+    fn mark_status(&self, id: &str, status: DataSetBusyStatus) -> BackendResult<()> {
+        let _ = status;
+        let _ = id;
+        todo!()
+    }
     fn save_metadata(&self, metadata: &crate::core::MetaData) -> BackendResult<()> {
         let _ = metadata;
         todo!()

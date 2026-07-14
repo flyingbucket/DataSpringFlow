@@ -29,11 +29,13 @@ DataSpringFlow 的核心目标是：**把数据集之间的派生关系组织为
   - 普通用户对自己的私有后端有完整权限，对所有公有后端有读取权限。
   - 若用户在 `DSFadmin` 用户组，则对本机公有后端有完整读写权限，对远程公有后端仍然只有读权限。
 
-- [ ] 数据状态与一致性标记设计:
-  - [ ] 增加MetaData字段status
-  - [ ] status对应一个enum，包含activate（可用）、creating（正在创建）、deleting（正在删除）、modifying（正在修改）、using（读取并使用）
-  - [ ] 增加mark_status(id,status)方法来标记status字段
-  - [ ] 所有增删改查方法根据status字段进行判断是否可用
+- [x] 数据状态与一致性标记设计:
+  - [x] 增加MetaData字段status
+  - [x] status对应一个enum，包含free(实际用None表示)（可用）、creating（正在创建）、deleting（正在删除）、modifying（正在修改）、reading（读取并使用）
+  - [x] 增加mark_status(id,status)方法来标记status字段
+  - [x] 所有增删改查方法根据status字段进行判断是否可用
+
+- [x] 增加mark_status到DatasetBackend trait
 
 ---
 

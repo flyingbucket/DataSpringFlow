@@ -18,7 +18,7 @@ mod tests {
             let folder_name = format!("{}_{}", name, tag);
             let ds_path = sandbox.create_dummy_dataset(&folder_name, "dummy-data");
 
-            // 🌟 修复 1：将描述文件路径和脚本路径包装进 Some() 中以匹配 Option<PathBuf>
+            // 将描述文件路径和脚本路径包装进 Some() 中以匹配 Option<PathBuf>
             let meta = MetaData::new(
                 name,
                 tag,
@@ -28,6 +28,7 @@ mod tests {
                 None,
                 deps.iter().map(|s| s.to_string()).collect(),
                 ds_path.join("merkle.bin"),
+                None,
             )
             .expect("Failed to create MetaData instance");
 
@@ -159,5 +160,89 @@ mod tests {
         let b = DatasetGraph::default();
         assert_eq!(a.adj_list.len(), b.adj_list.len());
         assert_eq!(a.datasets.len(), b.datasets.len());
+    }
+}
+
+#[cfg(test)]
+mod memory_backend_status_tests {
+    use crate::common::MemoryBackend;
+    use dsf_core::backend::{BackendError, DatasetBackend};
+    use dsf_core::core::{DataSetBusyStatus, MetaData};
+    use std::path::PathBuf;
+
+    /// 辅助函数：快速生成一个用于测试的纯内存 MetaData 实例
+    fn create_test_metadata(name: &str, tag: &str) -> MetaData {
+        MetaData {
+            name: name.to_string(),
+            tag: tag.to_string(),
+            hash: "mockhash_deadbeef12345".to_string(),
+            path: PathBuf::from(format!("/mock/path/{}", name)),
+            description_path: PathBuf::from(format!("/mock/path/{}/desc.md", name)),
+            script_path: PathBuf::from(format!("/mock/path/{}/run.py", name)),
+            owner: "tester$nobody".to_string(),
+            dependencies: vec![],
+            merkle_tree_path: PathBuf::from(format!("/mock/path/{}/merkle.bin", name)),
+            busy_status: None, // 初始为空闲状态
+        }
+    }
+
+    #[test]
+    fn test_memory_backend_mark_status_success() {
+        let backend = MemoryBackend::new();
+        let meta = create_test_metadata("imagenet", "v1");
+        let id = meta.id(); // 标准形式如 "imagenet@v1"
+
+        // 将元数据持久化存入内存 Map
+        backend.save_metadata(&meta).unwrap();
+
+        // 1. 验证成功标记为 Reading 状态
+        backend
+            .mark_status(&id, DataSetBusyStatus::Reading)
+            .unwrap();
+        let updated = backend.get_metadata(&id).unwrap();
+        assert_eq!(updated.busy_status, Some(DataSetBusyStatus::Reading));
+
+        // 2. 验证状态覆盖：切换为更严重的 Deleting 状态
+        backend
+            .mark_status(&id, DataSetBusyStatus::Deleting)
+            .unwrap();
+        let updated_again = backend.get_metadata(&id).unwrap();
+        assert_eq!(updated_again.busy_status, Some(DataSetBusyStatus::Deleting));
+    }
+
+    #[test]
+    fn test_memory_backend_mark_status_not_found() {
+        let backend = MemoryBackend::new();
+        let fake_id = "non_existent_dataset@v99.0";
+
+        // 尝试为一个根本没有被 save_metadata 注入过的数据集打标
+        let res = backend.mark_status(fake_id, DataSetBusyStatus::Modifying);
+
+        // 断言：必须返回严格的错误类型
+        assert!(res.is_err(), "对不存在的ID打标应当返回 Err 分支");
+        match res.unwrap_err() {
+            BackendError::DatasetNotFound { id } => {
+                assert_eq!(id, fake_id);
+            }
+            other => panic!(
+                "应当返回 BackendError::DatasetNotFound，但得到了: {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn test_memory_backend_mark_status_after_deletion() {
+        let backend = MemoryBackend::new();
+        let meta = create_test_metadata("mnist", "v2");
+        let id = meta.id();
+
+        // 存储后随即删除
+        backend.save_metadata(&meta).unwrap();
+        backend.delete_metadata(&id).unwrap();
+
+        // 已经从后端解绑清除的数据集，对其修改状态应当同样被拦截
+        let res = backend.mark_status(&id, DataSetBusyStatus::Creating);
+        assert!(res.is_err(), "已被彻底删除的 ID 不允许更新状态");
     }
 }

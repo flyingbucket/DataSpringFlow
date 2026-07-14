@@ -35,17 +35,17 @@ impl DSFService {
         self.backend.get_metadata(id).map_err(|e| e.to_io_error())
     }
 
-    /// register new dataset
+    /// register new dataset. if name@tag id exists, cover
     pub fn register(
         &self,
         opts: RegisterOptions,
         target_backend: Option<&BackendAddr>,
     ) -> Result<()> {
         validate_name_tag(&opts.name, &opts.tag)?;
-        ensure_exists(&opts.path, "--path")?;
-        ensure_exists(&opts.script_path, "--script-path")?;
+        ensure_exists(&opts.path, "dataset path")?;
+        ensure_exists(&opts.script_path, "script path")?;
         if let Some(ref d) = opts.description_path {
-            ensure_exists(d, "--description-path")?;
+            ensure_exists(d, "description path")?;
         }
 
         // 依赖必须存在
@@ -102,6 +102,7 @@ impl DSFService {
             opts.owner_nickname,
             opts.dependencies,
             merkle_tree_path,
+            None,
         )?;
         // backend_handel.as_ref().save_metadata(&meta)?;
         self.backend.save_metadata(&meta, target_backend)?;
