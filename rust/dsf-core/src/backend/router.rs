@@ -1,11 +1,12 @@
 use crate::backend::{BackendError, BackendRef, BackendResult};
 use crate::backend::{DatasetBackend, RemoteBackend, SqliteBackend, SqliteConfig};
 use crate::config::AppConfig;
-use crate::core::{MetaData, MetaDataError};
+use crate::core::{DataSetBusyStatus, MetaData, MetaDataError};
 use crate::utils::get_username;
 
 use serde::{Deserialize, Serialize};
 
+use std::fmt;
 use std::fs;
 use std::io::{self};
 use std::path::PathBuf;
@@ -33,6 +34,32 @@ pub enum BackendAddr {
     Global { addr: GlobalBackendAddr },
 }
 
+impl fmt::Display for GlobalBackendAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GlobalBackendAddr::Sqlite { config_path } => {
+                write!(f, "Global(Sqlite: {})", config_path.display())
+            }
+            GlobalBackendAddr::Remote { server_url } => {
+                write!(f, "Global(Remote: {})", server_url)
+            }
+        }
+    }
+}
+
+impl fmt::Display for BackendAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BackendAddr::Private { username } => {
+                write!(f, "Private(owner: {})", username)
+            }
+            BackendAddr::Global { addr } => {
+                // 直接委托给 GlobalBackendAddr 的 Display 实现
+                write!(f, "{}", addr)
+            }
+        }
+    }
+}
 impl GlobalBackendAddr {
     pub fn resolve_to_backend(&self) -> BackendResult<GlobalBackend> {
         match self {
@@ -160,11 +187,34 @@ impl StackedBackend {
             }
         }
     }
+
+    /// Mark MetaData status to ensure disk data and backend metadata consistency
+    pub fn mark_status(
+        &self,
+        id: &str,
+        busy_status: DataSetBusyStatus,
+        target_backend: Option<&BackendAddr>,
+    ) -> BackendResult<()> {
+        let backend = self.get_backend_by_addr(target_backend)?;
+        backend.mark_status(id, busy_status)?;
+        Ok(())
+    }
+
     /// Retrieves the corresponding metadata by the dataset ID.
-    pub fn get_metadata(&self, id: &str) -> BackendResult<Vec<ScopedMetaData>> {
+    pub fn get_metadata(
+        &self,
+        id: &str,
+        target_backend: Option<&BackendAddr>,
+    ) -> BackendResult<Vec<ScopedMetaData>> {
+        if let Some(backend_addr) = target_backend {
+            let backend = self.get_backend_by_addr(target_backend)?;
+            let mut all_meta = Vec::new();
+            let meta = backend.get_metadata(id)?;
+            all_meta.push(ScopedMetaData(backend_addr.clone(), meta));
+            return Ok(all_meta);
+        }
         let mut all_meta = Vec::new();
-        let private_be = SqliteBackend::new(self.cfg.private_sqlite_cfg.clone())?;
-        match private_be.get_metadata(id) {
+        match self.private_be.get_metadata(id) {
             Ok(meta) => {
                 let addr = BackendAddr::Private {
                     username: meta.owner.clone(),

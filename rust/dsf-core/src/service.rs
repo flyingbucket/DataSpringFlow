@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 
 use crate::backend::{BackendAddr, ScopedId, ScopedMetaData, StackedBackend};
-use crate::core::{DSFDataSet, DataSetStatus, DataSetVerifyRes, MetaData, MetaDataError};
+use crate::core::{
+    DSFDataSet, DataSetBusyStatus, DataSetStatus, DataSetVerifyRes, MetaData, MetaDataError,
+};
 use crate::dag::{DatasetGraph, DatasetGraphError};
 use crate::utils::*;
 
@@ -30,9 +32,28 @@ impl DSFService {
     }
 
     /// query metadata according on id
-    pub fn query_meta(&self, id: &str) -> io::Result<Vec<ScopedMetaData>> {
+    pub fn query_meta(
+        &self,
+        id: &str,
+        target_backend: Option<&BackendAddr>,
+    ) -> io::Result<Vec<ScopedMetaData>> {
         validate_dataset_id(id).map_err(to_io_invalid_input)?;
-        self.backend.get_metadata(id).map_err(|e| e.to_io_error())
+        self.backend
+            .get_metadata(id, target_backend)
+            .map_err(|e| e.to_io_error())
+    }
+
+    /// Mark MetaData status to ensure disk data and backend metadata consistency
+    pub fn mark_status(
+        &self,
+        id: &str,
+        busy_status: DataSetBusyStatus,
+        target_backend: Option<&BackendAddr>,
+    ) -> io::Result<()> {
+        self.backend
+            .mark_status(id, busy_status, target_backend)
+            .map_err(|e| e.to_io_error())?;
+        Ok(())
     }
 
     /// register new dataset. if name@tag id exists, cover
@@ -47,11 +68,36 @@ impl DSFService {
         if let Some(ref d) = opts.description_path {
             ensure_exists(d, "description path")?;
         }
-
+        let id = format!("{}@{}", opts.name, opts.tag);
+        let meta = self.query_meta(&id, target_backend);
+        match meta {
+            Err(e) => {
+                log::warn!("Found error {e}");
+                log::warn!(
+                    "{} dataset not found in backend {}. \nIt's recommended to mark this dataset as 'creating' before you actually create and register it to ensure consistency between DSF metadata registration and actuall disk data storage",
+                    id,
+                    target_backend
+                        .map(|b| b.to_string())
+                        .unwrap_or_else(|| "Unknown".to_string())
+                );
+            }
+            Ok(meta) => match meta[0].1.busy_status {
+                Some(DataSetBusyStatus::Creating) => {}
+                _ => {
+                    log::warn!(
+                        "{} dataset not found in backend {}. \nIt's recommended to mark this dataset as 'creating' before you actually create and register it to ensure consistency between DSF metadata registration and actuall disk data storage",
+                        id,
+                        target_backend
+                            .map(|b| b.to_string())
+                            .unwrap_or_else(|| "Unknown".to_string())
+                    );
+                }
+            },
+        };
         // 依赖必须存在
         for dep_id in &opts.dependencies {
             validate_dataset_id(dep_id)?;
-            if self.backend.get_metadata(dep_id).is_err() {
+            if self.backend.get_metadata(dep_id, target_backend).is_err() {
                 bail!("Dependency dataset does not exist: {}", dep_id);
             }
         }

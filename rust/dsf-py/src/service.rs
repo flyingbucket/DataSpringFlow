@@ -27,10 +27,16 @@ impl PyDSFService {
     }
 
     /// Query metadata for a specific dataset ID (e.g., "imagenet@v1.0")
-    pub fn query_meta(&self, id: &str) -> PyResult<Vec<PyScopedMetaData>> {
+    #[pyo3(signature = (id, target_backend=None))]
+    pub fn query_meta(
+        &self,
+        id: &str,
+        target_backend: Option<PyBackendAddr>,
+    ) -> PyResult<Vec<PyScopedMetaData>> {
+        let backend_ref = target_backend.as_ref().map(|py_addr| &py_addr.inner);
         let meta = self
             .inner
-            .query_meta(id)
+            .query_meta(id, backend_ref)
             .map_err(|e| PyIOError::new_err(e.to_string()))?;
         Ok(meta.to_py_vec())
     }

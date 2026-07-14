@@ -54,7 +54,7 @@ fn test_service_register_and_query_success() {
 
     // 验证元数据查询 (返回 Vec<ScopedMetaData>)
     let scoped_metas = service
-        .query_meta("imagenet@v1.0")
+        .query_meta("imagenet@v1.0", None)
         .expect("应该能查到元数据");
     assert!(!scoped_metas.is_empty());
 
@@ -151,7 +151,8 @@ fn test_service_delete_with_reference_protection() {
 
     // 确保已被级联清除或无法查到
     assert!(
-        service.query_meta("base@v1").is_err() || service.query_meta("base@v1").unwrap().is_empty()
+        service.query_meta("base@v1", None).is_err()
+            || service.query_meta("base@v1", None).unwrap().is_empty()
     );
 }
 

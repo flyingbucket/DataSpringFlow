@@ -65,7 +65,9 @@ class DSFService:
         """Initializes the service by automatically detecting and building the backend."""
         ...
 
-    def query_meta(self, id: str) -> List[ScopedMetaData]:
+    def query_meta(
+        self, id: str, target_backend: Optional[BackendAddr] = None
+    ) -> List[ScopedMetaData]:
         """Query metadata for a specific dataset ID (e.g., "imagenet@v1.0")"""
         ...
 
