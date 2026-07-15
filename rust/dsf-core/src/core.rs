@@ -201,6 +201,7 @@ impl fmt::Display for DataSetBusyStatus {
         write!(f, "{}", self.as_str())
     }
 }
+
 impl std::str::FromStr for DataSetBusyStatus {
     type Err = ();
 
@@ -215,6 +216,28 @@ impl std::str::FromStr for DataSetBusyStatus {
     }
 }
 
+impl DataSetStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DataSetStatus::Healthy => "healthy",
+            DataSetStatus::Broken => "broken",
+            DataSetStatus::BrokenDeps => "broken_deps",
+            DataSetStatus::Unverified => "unverified",
+            // 穷举嵌套的 Busy 状态，保持高效的 &'static str 返回
+            DataSetStatus::Busy(DataSetBusyStatus::Reading) => "busy_reading",
+            DataSetStatus::Busy(DataSetBusyStatus::Modifying) => "busy_modifying",
+            DataSetStatus::Busy(DataSetBusyStatus::Deleting) => "busy_deleting",
+            DataSetStatus::Busy(DataSetBusyStatus::Creating) => "busy_creating",
+        }
+    }
+}
+
+/// 实现 Display trait。这样你就可以直接对 DataSetStatus 使用 .to_string() 或者在 println!("{}", status) 中使用了。
+impl fmt::Display for DataSetStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
 #[derive(Clone, Debug)]
 pub struct DataSetVerifyRes {
     pub status: DataSetStatus,

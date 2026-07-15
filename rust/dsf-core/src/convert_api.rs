@@ -1,6 +1,7 @@
 use crate::core::MetaData;
 use crate::dag::DatasetGraph;
 use dsf_api::{MetaDetailDto, WebGraphEdge, WebGraphNode, WebGraphResponse};
+
 impl From<MetaData> for MetaDetailDto {
     fn from(meta: MetaData) -> Self {
         let id = format!("{}@{}", meta.name, meta.tag);
@@ -31,7 +32,7 @@ impl From<DatasetGraph> for WebGraphResponse {
         for (id, dataset) in &value.datasets {
             nodes.push(WebGraphNode {
                 id: id.clone(),
-                label: dataset.metadata.id().clone(),
+                status: dataset.detailed_status.status.to_string(),
                 owner: Some(dataset.metadata.owner.clone()),
             });
         }
