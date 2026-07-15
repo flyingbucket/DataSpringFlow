@@ -8,6 +8,9 @@ authors.workspace = true
 dsf-core = { workspace = true }
 dsf-api = { workspace = true }
 
+askama.workspace = true
+askama_web.workspace = true
+# fluent-templates.workspace = true
 tokio.workspace = true
 tower-http.workspace = true
 axum.workspace = true

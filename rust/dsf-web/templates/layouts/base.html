@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ "app-brand"|localize(lang) }}{% endblock %}</title>
+    
+    <link rel="stylesheet" href="/assets/pico.min.css">
+    <script src="/assets/htmx.min.js"></script>
+    <script src="/assets/alpine.js" defer></script>
+
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            margin: 0;
+        }
+        header.app-header {
+            border-bottom: 1px solid var(--pico-muted-border-color);
+            padding: 0.5rem 0;
+            background-color: var(--pico-background-color);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        /* 双栏布局专用类：后续在详情/血缘工作台页面使用 */
+        .workspace-layout {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 1.5rem;
+            padding-top: 1rem;
+            padding-bottom: 1rem;
+            max-width: 100%;
+        }
+        @media (max-width: 768px) {
+            .workspace-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* 统一一些卡片的微调，让首屏和侧边栏更具整体感 */
+        .dataset-card {
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border: 1px solid var(--pico-muted-border-color);
+            border-radius: 8px;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .dataset-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--pico-card-box-shadow);
+            border-color: var(--pico-primary-background);
+            cursor: pointer;
+        }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body>
+
+    <header class="container-fluid app-header">
+        <nav>
+            <ul>
+                <li>
+                    <a href="/" class="contrast">
+                        <strong>{{ "app-brand"|localize(lang) }}</strong>
+                    </a>
+                </li>
+            </ul>
+            <ul>
+                <li><a href="/" class="secondary">{{ "nav-search"|localize(lang) }}</a></li>
+                
+                <li x-data="{ 
+                    currentLang: '{{ lang }}' 
+                }">
+                    <select class="outline" style="margin-bottom: 0; padding: 2px 8px; font-size: 0.85rem;"
+                            @change="window.location.search = '?lang=' + $event.target.value">
+                        <option value="zh-CN" :selected="currentLang === 'zh-CN'">简体中文</option>
+                        <option value="en-US" :selected="currentLang === 'en-US'">English</option>
+                    </select>
+                </li>
+
+                <li x-data="{ 
+                    darkMode: localStorage.getItem('theme') === 'dark' || 
+                             (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)
+                }" 
+                x-init="
+                    $watch('darkMode', val => {
+                        let theme = val ? 'dark' : 'light';
+                        document.documentElement.setAttribute('data-theme', theme);
+                        localStorage.setItem('theme', theme);
+                    });
+                    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+                ">
+                    <a href="#" @click.prevent="darkMode = !darkMode" class="secondary" style="font-size: 0.9rem;">
+                        <span x-show="!darkMode">🌙 {{ "theme-dark"|localize(lang) }}</span>
+                        <span x-show="darkMode">☀️ {{ "theme-light"|localize(lang) }}</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+    </header>
+
+    <main class="{% block container_class %}container{% endblock %}">
+        {% block content %}{% endblock %}
+    </main>
+
+</body>
+</html>

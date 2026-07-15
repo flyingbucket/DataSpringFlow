@@ -21,14 +21,12 @@ pub struct MetaDetailDto {
     pub busy_status: Option<String>,
 }
 
-/// 接口 D (check_is_referenced) 返回的反向依赖 DTO
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ReferrerDto {
+    pub backend_name: String,
     pub referrer_id: String,
-    // 如果 ScopedId 里包含 backend 信息，还可以增加 backend_name 字段
 }
 
-// 2. 只读 API 接口实现 (含 DTO 转换)
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct GraphQuery {
     pub root_id: String,
@@ -45,7 +43,7 @@ pub struct DatasetMetaDto {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct WebGraphNode {
     pub id: String,
-    pub label: String,
+    pub status: String,
     pub owner: Option<String>,
 }
 
