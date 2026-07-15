@@ -1,6 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["dsf-core", "dsf-cli", "dsf-py"]
+members = [
+  "dsf-core",
+  "dsf-cli",
+  "dsf-py",
+  "dsf-frontend",
+  "dsf-api",
+  "dsf-web",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -8,8 +15,9 @@ edition = "2024"
 authors = ["flyingbucket"]
 
 [workspace.dependencies]
-# 本地模块间依赖
 dsf-core = { path = "dsf-core" }
+dsf-web = { path = "dsf-web" }
+dsf-api = { path = "dsf-api" }
 
 # 公共核心依赖
 walkdir = "2"
@@ -46,6 +54,15 @@ pyo3-log = "0.13.4"
 clap = { version = "4", features = ["derive"] }
 dialoguer = "0.12"
 strum = { version = "0.28", features = ["derive"] }
+
+# frontend 
+dioxus = { version = "0.7", features = ["web", "router"] }
+reqwest = { version = "0.13", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.7" }
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+rust-embed = { version = "8.0", features = ["axum"] }
+mime_guess = "2.0"
 
 # 测试专属
 tempfile = "3"

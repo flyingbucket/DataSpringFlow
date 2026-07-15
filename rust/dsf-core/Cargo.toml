@@ -8,6 +8,8 @@ name = "dsf_core"
 crate-type = ["rlib"]
 
 [dependencies]
+dsf-api = { workspace = true }
+
 anyhow.workspace = true
 colored.workspace = true
 walkdir.workspace = true

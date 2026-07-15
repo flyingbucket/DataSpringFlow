@@ -118,6 +118,12 @@ impl StackedBackendConfig {
 pub struct ScopedMetaData(pub BackendAddr, pub MetaData);
 pub struct ScopedId(pub BackendAddr, pub String);
 
+impl fmt::Display for ScopedId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.0, self.1)
+    }
+}
+
 pub struct StackedBackend {
     cfg: StackedBackendConfig,
     private_be: SqliteBackend,
