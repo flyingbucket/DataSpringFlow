@@ -9,6 +9,7 @@
 .envrc
 
 # rust
+rust/*/dist
 rust/target/
 rust/target_container_release/ 
 rust/target_container_dev/
