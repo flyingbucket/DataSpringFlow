@@ -4,6 +4,7 @@ use colored::Colorize;
 use dialoguer::Confirm;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
+use std::net::IpAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -18,6 +19,7 @@ use dsf_core::backend::{
 use dsf_core::config::{AppConfig, InstallMode};
 use dsf_core::service::{DSFService, RegisterOptions};
 use dsf_core::utils::*;
+use dsf_web::run_server;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -106,6 +108,17 @@ pub enum Commands {
         #[arg(long, default_value_t = false)]
         global: bool,
     },
+
+    /// Start the DataSpringFlow Web UI server
+    Serve {
+        /// Host address to bind
+        #[arg(long, default_value = "0.0.0.0")]
+        host: IpAddr,
+
+        /// Port to listen on
+        #[arg(short, long, default_value_t = 8080)]
+        port: u16,
+    },
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, ValueEnum, Debug)]
@@ -115,7 +128,7 @@ pub enum VerifyLevel {
     Deep,
 }
 
-pub fn run(cli: Cli) -> Result<()> {
+pub async fn run(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
         Commands::Init { global } => handle_init(global),
         Commands::ShowConfig => handle_show_config(),
@@ -156,6 +169,11 @@ pub fn run(cli: Cli) -> Result<()> {
             yes,
             global,
         } => handle_delete(&id, force, yes, global),
+
+        Commands::Serve { host, port } => {
+            handle_serve(host, port).await?;
+            Ok(())
+        }
     }
 }
 
@@ -561,6 +579,15 @@ fn handle_delete(id: &str, force: bool, yes: bool, global: bool) -> Result<()> {
     Ok(())
 }
 
+async fn handle_serve(host: IpAddr, port: u16) -> anyhow::Result<()> {
+    let backend = build_backend_auto()?;
+    let service = DSFService::new(backend);
+
+    // 调用之前定义的 run_server
+    run_server(service, host, port).await?;
+
+    Ok(())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
