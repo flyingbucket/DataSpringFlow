@@ -1,0 +1,26 @@
+{% if referrers.is_empty() %}
+    <div style="padding: 0.8rem; text-align: center; border: 1px dashed var(--pico-muted-border-color); border-radius: 6px;">
+        <em class="secondary" style="font-size: 0.9rem;">
+            No downstream referrers. No other datasets depend on this one.
+        </em>
+    </div>
+{% else %}
+    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+        {% for referrer in referrers %}
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 1rem; border: 1px solid var(--pico-muted-border-color); border-radius: 6px; background-color: var(--pico-background-color); cursor: pointer;"
+                 onclick="window.location.href = '/workspace?id={{ referrer.referrer_id }}'">
+                
+                <div>
+                    <strong style="font-size: 0.95rem; font-family: var(--pico-font-family);">
+                        {{ referrer.referrer_id }}
+                    </strong>
+                </div>
+
+                <span style="font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 4px; background-color: var(--pico-code-background-color); border: 1px solid var(--pico-muted-border-color);">
+                    Backend: {{ referrer.backend_name }}
+                </span>
+                
+            </div>
+        {% endfor %}
+    </div>
+{% endif %}

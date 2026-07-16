@@ -1,23 +1,22 @@
 {% extends "layouts/base.html" %}
 
-{% block title %}{{ "app-brand"|localize(lang) }}{% endblock %}
+{% block title %}DataSpringFlow - Home{% endblock %}
 
 {% block content %}
 <div style="padding-top: 2rem; padding-bottom: 3rem;" 
      x-data="{ 
          searchQuery: '',
-         // 快速清空搜索框
          clearSearch() { this.searchQuery = ''; }
      }">
     
     <div style="text-align: center; margin-bottom: 2.5rem;">
         <h1 style="font-size: 2.5rem; margin-bottom: 0.5rem;">🌱 DataSpringFlow</h1>
-        <p class="secondary" style="font-size: 1.1rem;">{{ "app-title"|localize(lang) }}</p>
+        <p class="secondary" style="font-size: 1.1rem;">A lightweight, non-invasive metadata management system</p>
         
         <div style="position: relative; max-width: 650px; margin: 1.5rem auto 0 auto;">
             <input type="search" 
                    x-model="searchQuery" 
-                   placeholder="{{ 'search-placeholder'|localize(lang) }}" 
+                   placeholder="Search datasets by name, tag, or owner..." 
                    style="padding-right: 2.5rem; font-size: 1.1rem; border-radius: 30px;">
             <span x-show="searchQuery" 
                   @click="clearSearch()" 
@@ -26,7 +25,7 @@
             </span>
         </div>
         <small class="secondary">
-            {{ "sidebar-total"|localize_with_count(lang, datasets.len()) }}
+            Total: {{ datasets.len() }} datasets detected
         </small>
     </div>
 
@@ -37,7 +36,7 @@
                          '{{ dataset.name|lower }}'.includes(searchQuery.toLowerCase()) || 
                          '{{ dataset.tag|lower }}'.includes(searchQuery.toLowerCase()) ||
                          '{{ dataset.owner.as_deref().unwrap_or("")|lower }}'.includes(searchQuery.toLowerCase())"
-                 @click="window.location.href = '/dataset?id={{ dataset.id }}&lang={{ lang }}'">
+                 @click="window.location.href = '/workspace?id={{ dataset.id }}'">
                 
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
@@ -57,7 +56,7 @@
 
         <div x-show="[...$el.parentElement.children].filter(el => el.style.display !== 'none' && el.classList.contains('dataset-card')).length === 0" 
              style="text-align: center; padding: 3rem; color: var(--pico-muted-color);">
-            <p style="font-size: 1.2rem;">🔍 {{ "no-datasets"|localize(lang) }}</p>
+            <p style="font-size: 1.2rem;">🔍 No datasets match your criteria.</p>
         </div>
     </div>
 </div>

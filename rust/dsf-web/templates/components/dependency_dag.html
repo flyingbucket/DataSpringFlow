@@ -1,0 +1,168 @@
+<div class="dependency-dag-container" style="position: relative; width: 100%;">
+    <div id="dag-network" style="height: 400px; width: 100%; border: 1px solid var(--pico-muted-border-color); border-radius: 6px; background-color: var(--pico-card-background-color);"></div>
+    
+    <div id="dag-error-toast" style="display: none; position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%); background-color: var(--pico-form-element-invalid-active-border-color); color: #fff; padding: 0.6rem 1.2rem; border-radius: 4px; font-size: 0.85rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 10; animation: fadeIn 0.2s ease;">
+        ⚠️ <span id="dag-error-msg">Dataset does not exist!</span>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 0.8rem; margin-top: 0.8rem; font-size: 0.75rem; justify-content: center;">
+        <span style="display: flex; align-items: center; gap: 0.3rem;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #52c41a;"></span> Healthy</span>
+        <span style="display: flex; align-items: center; gap: 0.3rem;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #ff4d4f;"></span> Broken</span>
+        <span style="display: flex; align-items: center; gap: 0.3rem;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #faad14;"></span> Broken Deps</span>
+        <span style="display: flex; align-items: center; gap: 0.3rem;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #1890ff;"></span> Busy</span>
+        <span style="display: flex; align-items: center; gap: 0.3rem;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #8c8c8c;"></span> Unverified</span>
+    </div>
+</div>
+
+<script src="/assets/vis-network.min.js"></script>
+
+<script>
+(function() {
+    const rootId = "{{ detail.id }}";
+    const container = document.getElementById('dag-network');
+    const toast = document.getElementById('dag-error-toast');
+    const toastMsg = document.getElementById('dag-error-msg');
+
+    function showToast(message) {
+        toastMsg.innerText = message;
+        toast.style.display = 'block';
+        setTimeout(() => { toast.style.display = 'none'; }, 3000);
+    }
+
+    // 根据后端返回的 status 映射节点样式与配色
+    function mapNodeStyle(node) {
+        let color = { background: '#fafafa', border: '#8c8c8c', highlight: { background: '#f5f5f5', border: '#595959' } };
+        let labelEmoji = "⚪";
+
+        // 获取当前节点是否是当前主面板所查的 root 节点
+        const isRoot = node.id === rootId;
+        const borderWith = isRoot ? 3 : 1.5;
+
+        switch (node.status) {
+            case "healthy":
+                color = { background: '#f6ffed', border: '#b7eb8f', highlight: { background: '#e6f7ff', border: '#52c41a' } };
+                labelEmoji = "🟢";
+                break;
+            case "broken":
+                color = { background: '#fff1f0', border: '#ffa39e', highlight: { background: '#e6f7ff', border: '#ff4d4f' } };
+                labelEmoji = "🔴";
+                break;
+            case "broken_deps":
+                color = { background: '#fffbe6', border: '#ffe58f', highlight: { background: '#e6f7ff', border: '#faad14' } };
+                labelEmoji = "🟡";
+                break;
+            case "unverified":
+                color = { background: '#f5f5f5', border: '#d9d9d9', highlight: { background: '#e6f7ff', border: '#8c8c8c' } };
+                labelEmoji = "⚪";
+                break;
+            default:
+                // 匹配所有 "busy_reading", "busy_modifying", "busy_deleting", "busy_creating" 等繁忙状态
+                if (node.status.startsWith("busy")) {
+                    color = { background: '#e6f7ff', border: '#91d5ff', highlight: { background: '#bae7ff', border: '#1890ff' } };
+                    labelEmoji = "⚡";
+                }
+                break;
+        }
+
+        return {
+            id: node.id,
+            label: `${labelEmoji} ${node.id}\n👤 ${node.owner || 'System'}`,
+            shape: 'box',
+            margin: 10,
+            borderWidth: borderWith,
+            color: color,
+            font: {
+                color: 'var(--pico-color)',
+                face: 'var(--pico-font-family)',
+                size: 13,
+                bold: isRoot ? { color: 'var(--pico-color)', size: 14 } : false
+            },
+            shapeProperties: {
+                borderRadius: 6
+            }
+        };
+    }
+
+    // 异步拉取依赖图数据并渲染
+    fetch(`/api/dependencies?root_id=${encodeURIComponent(rootId)}`)
+        .then(response => {
+            if (!response.ok) throw new Error("Failed to load dependency DAG");
+            return response.json();
+        })
+        .then(data => {
+            // 保存节点 ID 集合用于后续跳转存在性判断
+            const validNodeIds = new Set(data.nodes.map(n => n.id));
+
+            // 处理节点
+            const visNodes = data.nodes.map(mapNodeStyle);
+
+            // 处理边
+            const visEdges = data.edges.map(edge => ({
+                from: edge.source,
+                to: edge.target,
+                arrows: 'to',
+                color: { color: 'var(--pico-muted-border-color)', highlight: '#1890ff' },
+                width: 1.5
+            }));
+
+            const networkData = { nodes: visNodes, edges: visEdges };
+            const options = {
+                nodes: {
+                    shadow: true
+                },
+                edges: {
+                    smooth: {
+                        type: 'cubicBezier',
+                        forceDirection: 'vertical',
+                        roundness: 0.5
+                    }
+                },
+                physics: {
+                    hierarchicalRepulsion: {
+                        nodeDistance: 180
+                    }
+                },
+                layout: {
+                    hierarchical: {
+                        direction: 'UD', // 从上至下的树状排列
+                        sortMethod: 'directed'
+                    }
+                },
+                interaction: {
+                    hover: true,
+                    dragNodes: true,
+                    zoomView: true
+                }
+            };
+
+            const network = new vis.Network(container, networkData, options);
+
+            // 4. 点击交互处理
+            network.on("click", function(params) {
+                if (params.nodes.length > 0) {
+                    const clickedNodeId = params.nodes[0];
+
+                    // 检查该节点在拓扑数据中是否存在
+                    if (validNodeIds.has(clickedNodeId)) {
+                        // 存在，跳转到其详情页
+                        window.location.href = `/workspace?id=${encodeURIComponent(clickedNodeId)}`;
+                    } else {
+                        // 不存在（可能是悬空或有问题的节点，拦截并报警）
+                        showToast(`❌ Dataset "${clickedNodeId}" does not exist in registry!`);
+                    }
+                }
+            });
+        })
+        .catch(err => {
+            console.error(err);
+            container.innerHTML = `<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--pico-form-element-invalid-active-border-color);">Failed to render dependency topology: ${err.message}</div>`;
+        });
+})();
+</script>
+
+<style>
+@keyframes fadeIn {
+    from { opacity: 0; transform: translate(-50%, 10px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+}
+</style>

@@ -7,31 +7,31 @@
                     {{ detail.name }}
                     <small class="secondary" style="font-size: 0.85rem; margin-left: 0.5rem;">{{ detail.tag }}</small>
                 </h3>
-                {% if detail.busy_status.is_some() %}
-                    <ins style="font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; background-color: var(--pico-ins-color); text-decoration: none;">
-                        ⏳ {{ detail.busy_status.as_ref().unwrap() }}
-                    </ins>
-                {% endif %}
+                {% include "status_badge.html" %}
             </div>
         </header>
         
-        {% include "components/detail_meta.html" %}
+        {% include "detailed_meta.html" %}
     </article>
 
     <article style="margin: 0; padding: 1.5rem; border: 1px solid var(--pico-muted-border-color); border-radius: 8px;">
-        <h4 style="margin-bottom: 1rem; font-weight: 600;">🕸️ {{ "lineage-title"|localize(lang) }}</h4>
+        <h4 style="margin-bottom: 1.2rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem;">
+            <span>🕸️</span> Dependency Lineage
+        </h4>
         
-        {% include "components/dependency_dag.html" %}
+        {% include "dependency_dag.html" %}
     </article>
 
     <article style="margin: 0; padding: 1.5rem; border: 1px solid var(--pico-muted-border-color); border-radius: 8px;">
-        <h4 style="margin-bottom: 1rem; font-weight: 600;">🔗 {{ "referrors-title"|localize(lang) }}</h4>
+        <h4 style="margin-bottom: 1.2rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem;">
+            <span>🔗</span> Downstream Referrers
+        </h4>
         
-        <div hx-get="/ui/referrers?id={{ detail.id }}&lang={{ lang }}" 
+        <div hx-get="/ui/referrers?id={{ detail.id }}" 
              hx-trigger="load" 
              hx-swap="innerHTML">
-             <div aria-busy="true" class="secondary" style="font-size: 0.85rem;">{{ "loading-text"|localize(lang) }}</div>
+             <div aria-busy="true" class="secondary" style="font-size: 0.85rem;">Loading downstream referrers...</div>
         </div>
     </article>
 
-    </div>
+</div>

@@ -1,0 +1,147 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}Workspace - DataSpringFlow{% endblock %}
+
+{% block container_class %}container-fluid{% endblock %}
+
+{% block head %}
+<style>
+    /* 左侧 Sidebar 滚动区与粘性定位 */
+    .sidebar-wrapper {
+        position: sticky;
+        top: 80px; /* 避开 sticky header */
+        height: calc(100vh - 120px);
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .sidebar-list-scroll {
+        flex: 1;
+        overflow-y: auto;
+        padding-right: 4px;
+    }
+
+    /* 滚动条美化 */
+    .sidebar-list-scroll::-webkit-scrollbar {
+        width: 6px;
+    }
+    .sidebar-list-scroll::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .sidebar-list-scroll::-webkit-scrollbar-thumb {
+        background: var(--pico-muted-border-color);
+        border-radius: 4px;
+    }
+
+    /* 紧凑型侧边栏卡片设计 */
+    .mini-dataset-card {
+        padding: 0.75rem;
+        margin-bottom: 0.5rem;
+        border: 1px solid var(--pico-muted-border-color);
+        border-radius: 6px;
+        background-color: var(--pico-card-background-color);
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    .mini-dataset-card:hover {
+        border-color: var(--pico-primary-background);
+        background-color: var(--pico-code-background-color);
+    }
+    /* 激活态卡片样式 */
+    .mini-dataset-card.active {
+        border-color: var(--pico-primary);
+        background-color: var(--pico-primary-background);
+        box-shadow: inset 3px 0 0 0 var(--pico-primary);
+    }
+
+    /* 右侧主详情面板 */
+    .main-detail-area {
+        min-height: calc(100vh - 120px);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="workspace-layout" 
+     x-data="{ 
+         searchQuery: '',
+         /* 初始化时：如果后端传入了 active_id 则使用，否则为空 */
+         activeId: '{{ active_id.as_deref().unwrap_or("") }}',
+         clearSearch() { this.searchQuery = ''; }
+     }">
+    
+    <aside class="sidebar-container">
+        <div class="sidebar-wrapper">
+            
+            <div style="position: relative;">
+                <input type="search" 
+                       x-model="searchQuery" 
+                       placeholder="Filter datasets..." 
+                       style="margin-bottom: 0; padding-right: 2rem; font-size: 0.9rem; border-radius: 20px;">
+                <span x-show="searchQuery" 
+                      @click="clearSearch()" 
+                      style="position: absolute; right: 0.75rem; top: 25%; cursor: pointer; color: var(--pico-muted-color); font-size: 0.85rem;">
+                      ✕
+                </span>
+            </div>
+
+            <div class="sidebar-list-scroll">
+                {% for dataset in datasets %}
+                    <div class="mini-dataset-card"
+                         :class="activeId === '{{ dataset.id }}' ? 'active' : ''"
+                         @click="activeId = '{{ dataset.id }}'"
+                         hx-get="/ui/panel?id={{ dataset.id }}"
+                         hx-target="#detailed-panel"
+                         hx-swap="innerHTML"
+                         hx-push-url="/workspace?id={{ dataset.id }}">
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem;">
+                            <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                <strong style="font-size: 0.9rem; display: block; overflow: hidden; text-overflow: ellipsis;">
+                                    {{ dataset.name }}
+                                </strong>
+                                <span style="font-size: 0.7rem; color: var(--pico-muted-color);">
+                                    {{ dataset.tag }}
+                                </span>
+                            </div>
+                            <span class="secondary" style="font-size: 0.75rem; white-space: nowrap; flex-shrink: 0;">
+                                👤 {{ dataset.owner.as_deref().unwrap_or("Unknown") }}
+                            </span>
+                        </div>
+                    </div>
+                {% endfor %}
+
+                <div x-show="[...$el.parentElement.children].filter(el => el.style.display !== 'none' && el.classList.contains('mini-dataset-card')).length === 0" 
+                     style="text-align: center; padding: 2rem 1rem; color: var(--pico-muted-color); font-size: 0.85rem;">
+                    No datasets match.
+                </div>
+            </div>
+
+        </div>
+    </aside>
+
+    <section class="main-detail-area">
+        <div id="detailed-panel">
+            {% if active_id.is_some() %}
+                <div hx-get="/ui/panel?id={{ active_id.as_ref().unwrap() }}" 
+                     hx-trigger="load" 
+                     hx-swap="innerHTML">
+                     <div aria-busy="true" class="secondary" style="text-align: center; padding-top: 5rem;">
+                         Loading dataset details...
+                     </div>
+                </div>
+            {% else %}
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; border: 2px dashed var(--pico-muted-border-color); border-radius: 8px; padding: 4rem 2rem; text-align: center; color: var(--pico-muted-color);">
+                    <span style="font-size: 3rem; margin-bottom: 1rem;">🌱</span>
+                    <h4 style="margin-bottom: 0.5rem; font-weight: 600;">Welcome to DataSpringFlow Workspace</h4>
+                    <p style="max-width: 450px; font-size: 0.95rem; margin: 0 auto;">
+                        Select any dataset metadata card from the left sidebar to inspect details, analyze dependency topologies, and browse downstream lineage relationships.
+                    </p>
+                </div>
+            {% endif %}
+        </div>
+    </section>
+
+</div>
+{% endblock %}
