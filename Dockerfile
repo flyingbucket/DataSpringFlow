@@ -21,10 +21,6 @@ RUN apt-get update && apt-get install -y \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# dioxus for rust 
-RUN rustup target add wasm32-unknown-unknown
-RUN curl -sSL https://dioxus.dev/install.sh | bash
-
 # 安装 maturin 编译工具
 RUN pip3 install --break-system-packages maturin
 

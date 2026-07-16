@@ -21,3 +21,4 @@ rust/*/Cargo.lock
 *.so
 *.db
 release/
+examples/example_data/
