@@ -16,6 +16,46 @@ pub enum GlobalBackend {
     Remote(RemoteBackend),
 }
 
+impl DatasetBackend for GlobalBackend {
+    fn get_metadata(&self, id: &str) -> BackendResult<MetaData> {
+        match self {
+            GlobalBackend::Sqlite(be) => be.get_metadata(id),
+            GlobalBackend::Remote(be) => be.get_metadata(id),
+        }
+    }
+
+    fn mark_status(&self, id: &str, status: DataSetBusyStatus) -> BackendResult<()> {
+        match self {
+            GlobalBackend::Sqlite(be) => be.mark_status(id, status),
+            GlobalBackend::Remote(be) => be.mark_status(id, status),
+        }
+    }
+    fn save_metadata(&self, metadata: &MetaData) -> BackendResult<()> {
+        match self {
+            GlobalBackend::Sqlite(be) => be.save_metadata(metadata),
+            GlobalBackend::Remote(be) => be.save_metadata(metadata),
+        }
+    }
+    fn check_is_referenced(&self, target_id: &str) -> BackendResult<Vec<String>> {
+        match self {
+            GlobalBackend::Sqlite(be) => be.check_is_referenced(target_id),
+            GlobalBackend::Remote(be) => be.check_is_referenced(target_id),
+        }
+    }
+    fn list_all_metadata(&self) -> BackendResult<Vec<MetaData>> {
+        match self {
+            GlobalBackend::Sqlite(be) => be.list_all_metadata(),
+            GlobalBackend::Remote(be) => be.list_all_metadata(),
+        }
+    }
+    fn delete_metadata(&self, id: &str) -> BackendResult<()> {
+        match self {
+            GlobalBackend::Sqlite(be) => be.delete_metadata(id),
+            GlobalBackend::Remote(be) => be.delete_metadata(id),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum GlobalBackendAddr {
@@ -124,49 +164,57 @@ impl fmt::Display for ScopedId {
     }
 }
 
+type LocalGlobalComb = (GlobalBackendAddr, SqliteBackend);
+type RemoteGlobalComb = (GlobalBackendAddr, GlobalBackend);
+
 pub struct StackedBackend {
     cfg: StackedBackendConfig,
-    private_be: SqliteBackend,
-    reachable_global_be: Vec<(GlobalBackendAddr, GlobalBackend)>,
+    pub private_be: SqliteBackend,
+    pub local_global_be: Option<LocalGlobalComb>,
+    pub reachable_remote_be: Vec<RemoteGlobalComb>,
 }
 
 impl StackedBackend {
     pub fn new(cfg: StackedBackendConfig) -> BackendResult<Self> {
-        let reachable_global_be = StackedBackend::resolve_all_global_idiomatic(&cfg)?;
+        let (local_global_be, reachable_remote_be) =
+            StackedBackend::resolve_all_global_idiomatic(&cfg)?;
         let private_be = SqliteBackend::new(cfg.private_sqlite_cfg.clone())?;
         Ok(Self {
             cfg,
             private_be,
-            reachable_global_be,
+            local_global_be,
+            reachable_remote_be,
         })
     }
 
     fn resolve_all_global_idiomatic(
         cfg: &StackedBackendConfig,
-    ) -> BackendResult<Vec<(GlobalBackendAddr, GlobalBackend)>> {
-        let all_global = cfg
-            .global_repos
-            .iter()
-            .filter_map(|g| match g.resolve_to_backend() {
-                Ok(be) => match be {
-                    GlobalBackend::Remote(bac) => {
-                        let reachable = bac.reachable();
-                        if reachable {
-                            Some((g.clone(), GlobalBackend::Remote(bac)))
-                        } else {
-                            None
+    ) -> BackendResult<(Option<LocalGlobalComb>, Vec<RemoteGlobalComb>)> {
+        let (sqlite, remotes) = cfg.global_repos.iter().fold(
+            (None, Vec::new()),
+            |(mut sqlite_acc, mut remotes_acc), g| {
+                match g.resolve_to_backend() {
+                    Ok(be) => match be {
+                        GlobalBackend::Sqlite(bac) => {
+                            if sqlite_acc.is_none() {
+                                sqlite_acc = Some((g.clone(), bac));
+                            }
                         }
+                        GlobalBackend::Remote(bac) => {
+                            if bac.reachable() {
+                                remotes_acc.push((g.clone(), GlobalBackend::Remote(bac)));
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        log::warn!("Skipping broken backend: {e}");
                     }
-                    GlobalBackend::Sqlite(bac) => Some((g.clone(), GlobalBackend::Sqlite(bac))),
-                },
-                Err(e) => {
-                    log::warn!("Skipping broken backend: {e}");
-                    None
                 }
-            })
-            .collect();
+                (sqlite_acc, remotes_acc)
+            },
+        );
 
-        Ok(all_global)
+        Ok((sqlite, remotes))
     }
 
     pub fn get_backend_by_addr<'a>(
@@ -174,20 +222,46 @@ impl StackedBackend {
         target_backend: Option<&BackendAddr>,
     ) -> BackendResult<BackendRef<'a>> {
         match target_backend {
+            // 无指定，或指定为私有层
             None | Some(BackendAddr::Private { .. }) => Ok(&self.private_be as BackendRef<'a>),
-            Some(BackendAddr::Global { addr }) => {
-                // 在预筛过的可达列表里查找对应的已解析后端
+
+            // 指定为 Global，且内部地址为 Sqlite 变体
+            Some(BackendAddr::Global {
+                addr: GlobalBackendAddr::Sqlite { .. },
+            }) => self
+                .local_global_be
+                .as_ref()
+                .map(|be| &be.1 as BackendRef<'a>)
+                .ok_or_else(|| BackendError::Unsupported {
+                    message: "Local global sqlite backend is not configured".to_string(),
+                }),
+
+            // 指定为 Global，且内部地址为 Remote 变体
+            Some(BackendAddr::Global {
+                addr: GlobalBackendAddr::Remote { server_url },
+            }) => {
+                // 在预筛过的远程可达列表中，根据 server_url 匹配对应的已解析后端
                 let found_backend = self
-                    .reachable_global_be
+                    .reachable_remote_be
                     .iter()
-                    .find(|(global_addr, _)| global_addr == addr)
+                    .find(|(global_addr, _)| {
+                        if let GlobalBackendAddr::Remote {
+                            server_url: cur_url,
+                        } = global_addr
+                        {
+                            cur_url == server_url
+                        } else {
+                            false
+                        }
+                    })
                     .map(|(_, be)| be);
 
                 match found_backend {
-                    Some(GlobalBackend::Sqlite(sqlite_be)) => Ok(sqlite_be as BackendRef<'a>),
                     Some(GlobalBackend::Remote(_remote_be)) => Err(BackendError::Unsupported {
                         message: "Remote backend is currently unimplemented".to_string(),
                     }),
+                    // 因为这里已经是 Remote 变体的分支，按理说搜出来的后端不应该是 Sqlite
+                    Some(GlobalBackend::Sqlite(_)) => Err(BackendError::BackendNotFound),
                     None => Err(BackendError::BackendNotFound),
                 }
             }
@@ -234,8 +308,23 @@ impl StackedBackend {
             Err(e) => return Err(e),
         }
 
+        if let Some((global_addr, sqlite_be)) = &self.local_global_be {
+            match sqlite_be.get_metadata(id) {
+                Ok(meta) => {
+                    all_meta.push(ScopedMetaData(
+                        BackendAddr::Global {
+                            addr: global_addr.clone(),
+                        },
+                        meta,
+                    ));
+                }
+                Err(BackendError::DatasetNotFound { .. }) => {}
+                Err(e) => return Err(e),
+            }
+        }
+
         // 遍历所有全局公有后端
-        for (global_addr, backend) in &self.reachable_global_be {
+        for (global_addr, backend) in &self.reachable_remote_be {
             let res = match backend {
                 GlobalBackend::Sqlite(sqlite_be) => sqlite_be.get_metadata(id),
                 GlobalBackend::Remote(_) => continue, // TODO: 暂不支持远程读取
@@ -299,9 +388,21 @@ impl StackedBackend {
                 ));
             }
         }
-
+        // 本地全局公有后端
+        if let Some((global_addr, sqlite_be)) = &self.local_global_be
+            && let Ok(refs) = sqlite_be.check_is_referenced(target_id)
+        {
+            for id in refs {
+                references.push(ScopedId(
+                    BackendAddr::Global {
+                        addr: global_addr.clone(),
+                    },
+                    id,
+                ));
+            }
+        }
         // 依次查询当前服务器配置的所有公有后端
-        for (global_addr, backend) in &self.reachable_global_be {
+        for (global_addr, backend) in &self.reachable_remote_be {
             if let GlobalBackend::Sqlite(sqlite_be) = backend
                 && let Ok(refs) = sqlite_be.check_is_referenced(target_id)
             {
@@ -334,7 +435,21 @@ impl StackedBackend {
             }
         }
 
-        for (global_addr, backend) in &self.reachable_global_be {
+        // 本地全局公有后端
+        if let Some((global_addr, sqlite_be)) = &self.local_global_be
+            && let Ok(metas) = sqlite_be.list_all_metadata()
+        {
+            for meta in metas {
+                unique_metas.push(ScopedMetaData(
+                    BackendAddr::Global {
+                        addr: global_addr.clone(),
+                    },
+                    meta,
+                ));
+            }
+        }
+
+        for (global_addr, backend) in &self.reachable_remote_be {
             if let GlobalBackend::Sqlite(sqlite_be) = backend
                 && let Ok(metas) = sqlite_be.list_all_metadata()
             {
@@ -367,8 +482,16 @@ impl StackedBackend {
             Err(e) => return Err(e),
         }
 
+        // 本地全局公有后端
+        if let Some((_, sqlite_be)) = &self.local_global_be {
+            match sqlite_be.delete_metadata(id) {
+                Ok(_) => return Ok(()),
+                Err(BackendError::DatasetNotFound { .. }) => {}
+                Err(e) => return Err(e), // 如果没有写权限，这里抛出 PermissionDenied
+            }
+        }
         // 从所有global后端中找到本地global sqlite后端并尝试删除
-        for (_, backend) in &self.reachable_global_be {
+        for (_, backend) in &self.reachable_remote_be {
             let GlobalBackend::Sqlite(backend) = backend else {
                 continue;
             };
@@ -386,6 +509,23 @@ impl StackedBackend {
             "Cannot delete dataset: id '{}' not found in any level of StackBackend",
             id
         );
+        Err(BackendError::DatasetNotFound { id: id.to_string() })
+    }
+
+    /// 专为本地 DAG 构建提供：在当前服务器的本地后端中定位数据集归属。
+    /// 优先级：私有库 (private_be) > 本地全局库 (local_global_be)。
+    /// 找到后立即短路返回对应单体数据库的 BackendRef 句柄
+    pub fn resolve_local_backend<'a>(&'a self, id: &str) -> BackendResult<BackendRef<'a>> {
+        if self.private_be.get_metadata(id).is_ok() {
+            return Ok(&self.private_be as BackendRef<'a>);
+        }
+
+        if let Some((_, sqlite_be)) = &self.local_global_be
+            && sqlite_be.get_metadata(id).is_ok()
+        {
+            return Ok(sqlite_be as BackendRef<'a>);
+        }
+        log::error!("Dataset not found");
         Err(BackendError::DatasetNotFound { id: id.to_string() })
     }
 }
