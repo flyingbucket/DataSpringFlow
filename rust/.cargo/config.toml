@@ -1,0 +1,6 @@
+[build]
+rustflags = [
+  "--remap-path-prefix=/home/flyingbucket/CODE/DataSpringFlow=DataSpringFlow",
+  "--remap-path-prefix=/workspace=DataSpringFlow",
+  "--remap-path-prefix=/app=DataSpringFlow",
+]

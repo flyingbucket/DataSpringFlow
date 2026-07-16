@@ -6,6 +6,10 @@ class DatasetStatus:
     Broken: DatasetStatus
     BrokenDeps: DatasetStatus
     Unverified: DatasetStatus
+    BusyReading: DatasetStatus
+    BusyModifying: DatasetStatus
+    BusyDeleting: DatasetStatus
+    BusyCreating: DatasetStatus
 
 class DataSetVerifyRes:
     status: DatasetStatus
@@ -125,4 +129,13 @@ class DSFService:
 
     def check_is_referenced(self, target_id: str) -> List[ScopedId]:
         """List all datasets that depend on <target_id>"""
+        ...
+
+    def mark_status(
+        self,
+        id: str,
+        status: DatasetStatus,
+        target_backend: Optional[BackendAddr] = None,
+    ) -> None:
+        """Mark the status of a dataset manually"""
         ...

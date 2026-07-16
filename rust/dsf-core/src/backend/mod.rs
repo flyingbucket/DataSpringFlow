@@ -144,7 +144,62 @@ impl BackendError {
 pub type BackendResult<T> = Result<T, BackendError>;
 
 pub fn capture_backtrace() {
-    log::debug!("{}", std::backtrace::Backtrace::force_capture());
+    struct StackFrame {
+        name: String,
+        file: String,
+        line: u32,
+    }
+
+    let mut frames = Vec::new();
+
+    backtrace::trace(|frame| {
+        backtrace::resolve_frame(frame, |symbol| {
+            if let Some(name) = symbol.name() {
+                let symbol_name = name.to_string();
+
+                let file_path = symbol
+                    .filename()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "unknown".to_string());
+
+                // white list
+                let is_my_code = symbol_name.starts_with("dsf_")
+                    || file_path.contains("/dsf-")
+                    || file_path.contains("DataSpringFlow");
+
+                // blacklist
+                let is_external_noise = file_path.contains(".cargo")
+                    || file_path.contains(".rustup")
+                    || symbol_name.starts_with("backtrace::")
+                    || symbol_name.contains("capture_backtrace")
+                    || symbol_name.contains("::Future::poll");
+
+                if is_my_code && !is_external_noise {
+                    let line = symbol.lineno().unwrap_or(0);
+                    frames.push(StackFrame {
+                        name: symbol_name,
+                        file: file_path,
+                        line,
+                    });
+                }
+            }
+        });
+
+        true // 继续向上追踪
+    });
+
+    if !frames.is_empty() {
+        frames.reverse();
+        let mut filtered_backtrace = String::new();
+        for (index, frame) in frames.iter().enumerate() {
+            filtered_backtrace.push_str(&format!(
+                "    {:>2}: {}\n            at {}:{}\n",
+                index, frame.name, frame.file, frame.line
+            ));
+        }
+
+        log::debug!("Filtered Backtrace (Python-style):\n{}", filtered_backtrace);
+    }
 }
 
 pub fn build_backend_auto() -> BackendResult<StackedBackend> {

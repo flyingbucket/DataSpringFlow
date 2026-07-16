@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}DataSpringFlow{% endblock %}</title>
+    
+    <link rel="stylesheet" href="/assets/pico.min.css">
+    <script src="/assets/htmx.min.js"></script>
+    <script src="/assets/alpine.js" defer></script>
+
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            margin: 0;
+        }
+        header.app-header {
+            border-bottom: 1px solid var(--pico-muted-border-color);
+            padding: 0.5rem 0;
+            background-color: var(--pico-background-color);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        /* Workspace layout: Left Sidebar (320px) + Right Panel (1fr) */
+        .workspace-layout {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 1.5rem;
+            padding-top: 1rem;
+            padding-bottom: 1rem;
+            max-width: 100%;
+        }
+        @media (max-width: 768px) {
+            .workspace-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Generic dataset card style */
+        .dataset-card {
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border: 1px solid var(--pico-muted-border-color);
+            border-radius: 8px;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .dataset-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--pico-card-box-shadow);
+            border-color: var(--pico-primary-background);
+            cursor: pointer;
+        }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body>
+
+    <header class="container-fluid app-header">
+        <nav>
+            <ul>
+                <li>
+                    <a href="/" class="contrast">
+                        <strong>🌱 DataSpringFlow</strong>
+                    </a>
+                </li>
+            </ul>
+            <ul>
+                <li><a href="/" class="secondary">Search</a></li>
+                
+                <li x-data="{ 
+                    darkMode: localStorage.getItem('theme') === 'dark' || 
+                             (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)
+                }" 
+                x-init="
+                    $watch('darkMode', val => {
+                        let theme = val ? 'dark' : 'light';
+                        document.documentElement.setAttribute('data-theme', theme);
+                        localStorage.setItem('theme', theme);
+                    });
+                    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+                ">
+                    <a href="#" @click.prevent="darkMode = !darkMode" class="secondary" style="font-size: 0.9rem; text-decoration: none;">
+                        <span x-show="!darkMode">🌙 Dark Mode</span>
+                        <span x-show="darkMode">☀️ Light Mode</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+    </header>
+
+    <main class="{% block container_class %}container{% endblock %}">
+        {% block content %}{% endblock %}
+    </main>
+
+</body>
+</html>

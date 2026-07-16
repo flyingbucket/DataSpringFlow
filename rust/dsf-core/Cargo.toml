@@ -8,6 +8,8 @@ name = "dsf_core"
 crate-type = ["rlib"]
 
 [dependencies]
+dsf-api = { workspace = true }
+
 anyhow.workspace = true
 colored.workspace = true
 walkdir.workspace = true
@@ -29,6 +31,7 @@ r2d2_sqlite.workspace = true
 
 log.workspace = true
 env_logger.workspace = true
+backtrace.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

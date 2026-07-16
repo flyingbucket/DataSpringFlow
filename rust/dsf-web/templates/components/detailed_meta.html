@@ -1,0 +1,90 @@
+<section class="detailed-meta-section" style="display: flex; flex-direction: column; gap: 1.5rem;">
+
+    <div>
+        <h5 style="margin-bottom: 0.8rem; font-weight: 600; color: var(--pico-h5-color);">⚙️ System Properties</h5>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; background-color: var(--pico-card-background-color); padding: 1rem; border-radius: 6px; border: 1px solid var(--pico-muted-border-color);">
+            
+            <div>
+                <small class="secondary" style="display: block; font-size: 0.75rem; text-transform: uppercase;">Unique Identifier</small>
+                <code style="font-size: 0.85rem; padding: 0.1rem 0.3rem;">{{ detail.id }}</code>
+            </div>
+
+            <div>
+                <small class="secondary" style="display: block; font-size: 0.75rem; text-transform: uppercase;">Owner</small>
+                <span style="font-weight: 500;">{{ detail.owner }}</span>
+            </div>
+
+            <div>
+                <small class="secondary" style="display: block; font-size: 0.75rem; text-transform: uppercase;">Metadata Hash</small>
+                <code style="font-size: 0.8rem; word-break: break-all; white-space: normal;">{{ detail.hash }}</code>
+            </div>
+            <div>
+                <small class="secondary" style="display: block; font-size: 0.75rem; text-transform: uppercase;">Busy Status</small>
+                <span>
+                    {% if let Some(status) = detail.busy_status %}
+                        <mark>{{ status }}</mark>
+                    {% else %}
+                        <span class="secondary" style="font-style: italic;">Idle</span>
+                    {% endif %}
+                </span>
+            </div>
+
+        </div>
+    </div>
+
+    <div>
+        <h5 style="margin-bottom: 0.8rem; font-weight: 600; color: var(--pico-h5-color);">📁 File System Paths</h5>
+        <div style="background-color: var(--pico-card-background-color); padding: 1rem; border-radius: 6px; border: 1px solid var(--pico-muted-border-color); display: flex; flex-direction: column; gap: 0.8rem;">
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--pico-muted-border-color); padding-pb: 0.4rem;">
+                <span style="font-size: 0.9rem; font-weight: 500;">Data Path</span>
+                <code style="font-size: 0.85rem;">{{ detail.path }}</code>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--pico-muted-border-color); padding-pb: 0.4rem;">
+                <span style="font-size: 0.9rem; font-weight: 500;">Description Path</span>
+                <code style="font-size: 0.85rem;">{{ detail.description_path }}</code>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--pico-muted-border-color); padding-pb: 0.4rem;">
+                <span style="font-size: 0.9rem; font-weight: 500;">Script Path</span>
+                <code style="font-size: 0.85rem;">{{ detail.script_path }}</code>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 0.9rem; font-weight: 500;">Merkle Tree Path</span>
+                <code style="font-size: 0.85rem;">{{ detail.merkle_tree_path }}</code>
+            </div>
+
+        </div>
+    </div>
+
+    <div>
+        <h5 style="margin-bottom: 0.6rem; font-weight: 600; color: var(--pico-h5-color);">
+            ⬆️ Direct Upstream Inputs
+            <span class="secondary" style="font-size: 0.8rem; font-weight: normal;">({{ upstreams.len() }})</span>
+        </h5>
+        
+        {% if upstreams.is_empty() %}
+            <div style="padding: 0.8rem; text-align: center; border: 1px dashed var(--pico-muted-border-color); border-radius: 6px;">
+                <em class="secondary" style="font-size: 0.9rem;">No direct upstream datasets. This is a root dataset.</em>
+            </div>
+        {% else %}
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                {% for dep in upstreams %}
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 1rem; border: 1px solid var(--pico-muted-border-color); border-radius: 6px; background-color: var(--pico-background-color); cursor: pointer;"
+                         onclick="window.location.href = '/workspace?id={{ dep.id }}'">
+                        <div>
+                            <strong style="font-size: 0.95rem;">{{ dep.name }}</strong>
+                            <small class="secondary" style="margin-left: 0.5rem;">ID: {{ dep.id }}</small>
+                        </div>
+                        <span style="font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 4px; background-color: var(--pico-code-background-color); border: 1px solid var(--pico-muted-border-color);">
+                            {{ dep.tag }}
+                        </span>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
+
+</section>

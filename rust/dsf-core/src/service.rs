@@ -240,4 +240,17 @@ impl DSFService {
     pub fn check_is_referenced(&self, target_id: &str) -> Result<Vec<ScopedId>, MetaDataError> {
         self.backend.check_is_referenced(target_id)
     }
+
+    pub fn query_dependency_graph(
+        &self,
+        root_id: &str,
+        target_backend: Option<&BackendAddr>,
+    ) -> Result<DatasetGraph, anyhow::Error> {
+        let backend_handle = self.backend.get_backend_by_addr(target_backend)?;
+
+        let graph = DatasetGraph::from_root(root_id, backend_handle)?;
+
+        graph.check_cycle()?;
+        Ok(graph)
+    }
 }

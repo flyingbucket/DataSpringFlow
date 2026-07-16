@@ -1,0 +1,37 @@
+<div class="detailed-panel-container" style="display: flex; flex-direction: column; gap: 1.5rem;">
+
+    <article style="margin: 0; padding: 1.5rem; border: 1px solid var(--pico-muted-border-color); border-radius: 8px;">
+        <header style="margin: -1.5rem -1.5rem 1.2rem -1.5rem; padding: 0.8rem 1.5rem; border-bottom: 1px solid var(--pico-muted-border-color); background-color: var(--pico-code-background-color);">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0; font-size: 1.5rem; font-weight: 700;">
+                    {{ detail.name }}
+                    <small class="secondary" style="font-size: 0.85rem; margin-left: 0.5rem;">{{ detail.tag }}</small>
+                </h3>
+                {% include "status_badge.html" %}
+            </div>
+        </header>
+        
+        {% include "detailed_meta.html" %}
+    </article>
+
+    <article style="margin: 0; padding: 1.5rem; border: 1px solid var(--pico-muted-border-color); border-radius: 8px;">
+        <h4 style="margin-bottom: 1.2rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem;">
+            <span>🕸️</span> Dependency Lineage
+        </h4>
+        
+        {% include "dependency_dag.html" %}
+    </article>
+
+    <article style="margin: 0; padding: 1.5rem; border: 1px solid var(--pico-muted-border-color); border-radius: 8px;">
+        <h4 style="margin-bottom: 1.2rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem;">
+            <span>🔗</span> Downstream Referrers
+        </h4>
+        
+        <div hx-get="/ui/referrers?id={{ detail.id }}" 
+             hx-trigger="load" 
+             hx-swap="innerHTML">
+             <div aria-busy="true" class="secondary" style="font-size: 0.85rem;">Loading downstream referrers...</div>
+        </div>
+    </article>
+
+</div>
