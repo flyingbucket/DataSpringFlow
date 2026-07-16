@@ -6,6 +6,9 @@ from mock_creator import (
     generate_imagenet_features,
     generate_multimodal_data,
 )
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 
 def main():
