@@ -68,55 +68,29 @@ impl DSFService {
         if let Some(ref d) = opts.description_path {
             ensure_exists(d, "description path")?;
         }
-        let id = format!("{}@{}", opts.name, opts.tag);
-        let meta = self.query_meta(&id, target_backend);
-        match meta {
-            Err(e) => {
-                log::warn!("Found error {e}");
-                log::warn!(
-                    "{} dataset not found in backend {}. \nIt's recommended to mark this dataset as 'creating' before you actually create and register it to ensure consistency between DSF metadata registration and actuall disk data storage",
-                    id,
-                    target_backend
-                        .map(|b| b.to_string())
-                        .unwrap_or_else(|| "Unknown".to_string())
-                );
-            }
-            Ok(meta) => match meta[0].1.busy_status {
-                Some(DataSetBusyStatus::Creating) => {}
-                _ => {
-                    log::warn!(
-                        "{} dataset not found in backend {}. \nIt's recommended to mark this dataset as 'creating' before you actually create and register it to ensure consistency between DSF metadata registration and actuall disk data storage",
-                        id,
-                        target_backend
-                            .map(|b| b.to_string())
-                            .unwrap_or_else(|| "Unknown".to_string())
-                    );
-                }
-            },
-        };
         // 依赖必须存在
         for dep_id in &opts.dependencies {
             validate_dataset_id(dep_id)?;
-            if self.backend.get_metadata(dep_id, target_backend).is_err() {
+            if self.backend.get_metadata(dep_id, None).is_err() {
                 bail!("Dependency dataset does not exist: {}", dep_id);
             }
         }
 
         // DAG 查环
-        let backend_handel = self.backend.get_backend_by_addr(target_backend)?;
         let graph = DatasetGraph::from_root_with_deps(
             &opts.name,
             &opts.tag,
             &opts.dependencies,
-            backend_handel,
+            &self.backend,
         )?;
         graph.check_cycle()?;
 
         // 依赖健康检查
         let mut broken = Vec::new();
         for dep_id in &opts.dependencies {
+            let backend_handel = self.backend.resolve_local_backend(dep_id)?;
             let mut ds = DSFDataSet::load_from_id(dep_id, backend_handel)?;
-            let res = ds.verify(backend_handel, false)?;
+            let res = ds.verify(&self.backend, false)?;
             if res.status != DataSetStatus::Healthy {
                 broken.push(dep_id.clone());
             }
@@ -132,6 +106,7 @@ impl DSFService {
             }
 
             for dep_id in &broken {
+                let backend_handel = self.backend.resolve_local_backend(dep_id)?;
                 let mut ds = DSFDataSet::load_from_id(dep_id, backend_handel)?;
                 ds.refresh_and_commit(backend_handel)?;
             }
@@ -210,7 +185,7 @@ impl DSFService {
             .map_err(|e| e.to_dag_error())?;
         let backend_ref = backend_handel;
         let mut ds = DSFDataSet::load_from_id(id, backend_ref)?;
-        ds.verify(backend_ref, show_diff)
+        ds.verify(&self.backend, show_diff)
     }
 
     /// verify self only
@@ -241,14 +216,8 @@ impl DSFService {
         self.backend.check_is_referenced(target_id)
     }
 
-    pub fn query_dependency_graph(
-        &self,
-        root_id: &str,
-        target_backend: Option<&BackendAddr>,
-    ) -> Result<DatasetGraph, anyhow::Error> {
-        let backend_handle = self.backend.get_backend_by_addr(target_backend)?;
-
-        let graph = DatasetGraph::from_root(root_id, backend_handle)?;
+    pub fn query_dependency_graph(&self, root_id: &str) -> Result<DatasetGraph, anyhow::Error> {
+        let graph = DatasetGraph::from_root(root_id, &self.backend)?;
 
         graph.check_cycle()?;
         Ok(graph)
