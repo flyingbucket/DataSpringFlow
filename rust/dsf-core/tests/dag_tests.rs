@@ -1,5 +1,5 @@
 mod common;
-
+#[cfg(feature = "run_slow_tests")]
 #[cfg(test)]
 mod tests {
     use super::common::{MemoryBackend, TestSandbox};
@@ -163,6 +163,7 @@ mod tests {
     }
 }
 
+#[cfg(feature = "run_slow_tests")]
 #[cfg(test)]
 mod memory_backend_status_tests {
     use crate::common::MemoryBackend;

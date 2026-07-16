@@ -1,4 +1,4 @@
-use crate::backend::BackendRef;
+use crate::backend::StackedBackend;
 use crate::core::{DSFDataSet, DataSetVerifyRes};
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -50,20 +50,31 @@ impl DatasetGraph {
             adj_list: HashMap::new(),
         }
     }
-
     /// build reachable subgraph starting from root_id, return in Adjacency List form
-    pub fn from_root(root_id: &str, backend: BackendRef) -> io::Result<Self> {
+    pub fn from_root(root_id: &str, backend: &StackedBackend) -> Result<Self, DatasetGraphError> {
         let mut graph = Self::new();
         let mut to_visit = vec![root_id.to_string()];
         let mut visited = HashSet::new();
 
         while let Some(curr_id) = to_visit.pop() {
-            if visited.contains(&curr_id) {
+            if !visited.insert(curr_id.clone()) {
                 continue;
             }
-            visited.insert(curr_id.clone());
 
-            let dataset = DSFDataSet::load_from_id(&curr_id, backend)?;
+            let target_be = backend
+                .resolve_local_backend(&curr_id)
+                .map_err(|e| e.to_dag_error())?;
+
+            let dataset = DSFDataSet::load_from_id(&curr_id, target_be).map_err(|e| {
+                if e.kind() == io::ErrorKind::NotFound {
+                    DatasetGraphError::DatasetNotFound {
+                        node_id: curr_id.clone(),
+                    }
+                } else {
+                    DatasetGraphError::Io(e)
+                }
+            })?;
+
             let deps = dataset.metadata.dependencies.clone();
 
             for dep_id in &deps {
@@ -81,12 +92,12 @@ impl DatasetGraph {
 
     /// Build a temporary graph for "new dataset registration" scenario.
     /// Root node is virtual/new (name@tag), with dependencies provided by caller.
-    /// All dependency nodes must exist in backend metadata.
+    /// All dependency nodes must exist in local backends (private or local_global).
     pub fn from_root_with_deps(
         name: &str,
         tag: &str,
         dependencies: &[String],
-        backend: BackendRef,
+        backend: &StackedBackend,
     ) -> Result<Self, DatasetGraphError> {
         if name.contains('@') || tag.contains('@') {
             return Err(io::Error::new(
@@ -104,7 +115,7 @@ impl DatasetGraph {
             .adj_list
             .insert(root_id.clone(), dependencies.to_vec());
 
-        // 2) Traverse all reachable deps from root
+        // 2) Traverse all reachable deps from root across local backends
         let mut to_visit: Vec<String> = dependencies.to_vec();
         let mut visited: HashSet<String> = HashSet::new();
 
@@ -113,8 +124,13 @@ impl DatasetGraph {
                 continue;
             }
 
-            // dependency must exist in backend
-            let dataset = DSFDataSet::load_from_id(&curr_id, backend).map_err(|e| {
+            // 内部派发：定位依赖项存在于 private 还是 local_global
+            let target_be = backend
+                .resolve_local_backend(&curr_id)
+                .map_err(|e| e.to_dag_error())?;
+
+            // 实体加载：保持单库后端句柄调用
+            let dataset = DSFDataSet::load_from_id(&curr_id, target_be).map_err(|e| {
                 if e.kind() == io::ErrorKind::NotFound {
                     DatasetGraphError::DatasetNotFound {
                         node_id: curr_id.clone(),

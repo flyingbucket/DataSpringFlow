@@ -3,6 +3,7 @@ use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
+use crate::backend::StackedBackend;
 use crate::{
     backend::BackendRef,
     dag::{DatasetGraph, DatasetGraphError},
@@ -259,7 +260,7 @@ impl DSFDataSet {
 
     pub fn verify(
         &mut self,
-        backend: BackendRef,
+        backend: &StackedBackend,
         show_diff: bool,
     ) -> Result<DataSetVerifyRes, DatasetGraphError> {
         let root_id = self.metadata.id();

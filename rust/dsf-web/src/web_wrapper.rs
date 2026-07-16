@@ -212,7 +212,7 @@ async fn dependency_graph_handler(
     Query(query): Query<GraphQuery>,
     State(service): State<Arc<DSFService>>,
 ) -> impl IntoResponse {
-    match service.query_dependency_graph(&query.root_id, None) {
+    match service.query_dependency_graph(&query.root_id) {
         Ok(dataset_graph) => {
             let web_graph: WebGraphResponse = dataset_graph.into();
             (StatusCode::OK, Json(web_graph)).into_response()
