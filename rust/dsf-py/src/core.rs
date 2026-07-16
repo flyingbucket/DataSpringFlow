@@ -69,6 +69,24 @@ impl From<PyDataSetStatus> for DataSetStatus {
         }
     }
 }
+
+impl TryFrom<PyDataSetStatus> for DataSetBusyStatus {
+    type Error = String;
+
+    fn try_from(status: PyDataSetStatus) -> Result<Self, Self::Error> {
+        match status {
+            PyDataSetStatus::BusyReading => Ok(DataSetBusyStatus::Reading),
+            PyDataSetStatus::BusyModifying => Ok(DataSetBusyStatus::Modifying),
+            PyDataSetStatus::BusyDeleting => Ok(DataSetBusyStatus::Deleting),
+            PyDataSetStatus::BusyCreating => Ok(DataSetBusyStatus::Creating),
+            other => Err(format!(
+                "Status '{:?}' is not a busy status! Only BusyReading, BusyModifying, BusyDeleting, and BusyCreating are allowed in mark_status.",
+                other
+            )),
+        }
+    }
+}
+
 /// Python binding for DataSetBusyStatus
 #[pyclass(name = "DataSetBusyStatus", eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq)]

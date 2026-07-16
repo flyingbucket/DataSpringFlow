@@ -2,7 +2,7 @@ use pyo3::exceptions::{PyIOError, PyRuntimeError};
 use pyo3::prelude::*;
 use std::path::PathBuf;
 
-use super::core::PyDataSetVerifyRes;
+use super::core::{PyDataSetStatus, PyDataSetVerifyRes};
 use super::router::{PyBackendAddr, PyScopedId, PyScopedMetaData, ToPyVec};
 use dsf_core::backend::build_backend_auto;
 use dsf_core::service::{DSFService, RegisterOptions};
@@ -145,5 +145,25 @@ impl PyDSFService {
             .map_err(|e| PyIOError::new_err(e.to_string()))?;
 
         Ok(ids.to_py_vec())
+    }
+
+    #[pyo3(signature = (id, status, target_backend=None))]
+    pub fn mark_status(
+        &self,
+        id: &str,
+        status: PyDataSetStatus,
+        target_backend: Option<PyBackendAddr>,
+    ) -> PyResult<()> {
+        let backend_ref = target_backend.as_ref().map(|py_addr| &py_addr.inner);
+
+        // 尝试将 Python 侧平铺的 PyDataSetStatus 转换为 Rust 核心所需的 DataSetBusyStatus
+        let busy_status: dsf_core::core::DataSetBusyStatus =
+            status.try_into().map_err(PyRuntimeError::new_err)?; // 转换失败时将错误信息抛回 Python 侧
+
+        // 调用核心服务
+        self.inner
+            .mark_status(id, busy_status, backend_ref)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to mark status: {:#}", e)))?;
+        Ok(())
     }
 }
