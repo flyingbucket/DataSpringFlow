@@ -114,10 +114,10 @@ impl DatasetGraph {
         graph
             .adj_list
             .insert(root_id.clone(), dependencies.to_vec());
-
         // 2) Traverse all reachable deps from root across local backends
         let mut to_visit: Vec<String> = dependencies.to_vec();
         let mut visited: HashSet<String> = HashSet::new();
+        visited.insert(root_id.clone());
 
         while let Some(curr_id) = to_visit.pop() {
             if !visited.insert(curr_id.clone()) {
