@@ -41,6 +41,49 @@ DataSpringFlow 把这种关系显式建模为 **DAG（有向无环图）**，并
 - Linux/Unix 系统（依赖 XDG 目录规范）
 *若从源码安装则另需rust工具链*
 
+### 安装预编译版本
+
+预编译版本基于'quay.io/pypa/manylinux_2_28_x86_64'容器编译，支持glibc 2.28及以上的各类linux系统。
+
+安装脚本可从release界面下载，脚本内打包了所有依赖（类似于anaconda安装脚本），
+赋予运行权限：
+
+```bash
+chmod +x ./dsf_installer_manylinux_2_28_x86_64.sh
+```
+
+#### 以管理员身份全局安装
+
+脚本自动创建DSFadmin用户组并初始化全局公有注册中心`/var/lib/dataspringflow/dsf.db`
+
+```bash
+sudo ./dsf_installer_manylinux_2_28_x86_64.sh
+
+```
+
+cli工具将被安装到`/usr/bin/dsf`,python包wheel被放在`/var/lib/dataspringflow/py/dataspringflow*.whl`
+
+全局安装后任何用户就可通过dsf命令初始化个人私有注册中心，此时用户会自动加入全局的多中心系统，可以读取全局注册中心的数据项，其个人注册的数据项对管理员可见。
+
+```bash
+dsf init
+```
+
+#### 以普通用户身份安装
+
+脚本将自动为该用户创建私有注册中心`~/.local/share/dataspringflow/dsf.db`
+
+```bash
+./dsf_installer_manylinux_2_28_x86_64.sh
+```
+
+cli工具将被安装到`~/.local/bin/dsf`,python包wheel被放在`~/.local/share/dataspringflow/py/dataspringflow*.whl`
+
+此时由于不存在全局公有注册中心，所有私人数据项均有当前用户自行管理，不存在DSFadmin管理员，其他普通用户对您的数据也不可见。如果后续全局安装了本系统，早先个人安装的用户可重新运行`dsf init`加入全局管理系统，原先的私人数据不会改变，加入后用户可读全局私有注册中心，
+管理员可读此用户的私有中心数据项。
+
+在任何python虚拟环境中可不联网使用pip从本地的wheel安装此python操作接口包。
+
 ### 从源码安装
 
 ```bash
@@ -55,22 +98,42 @@ cd rust
 cargo build --release # 生成dsf cli工具
 ```
 
-### 构建说明
+使用`sudo dsf init --global`初始化全局注册中心，使用`dsf init`注册用户私有注册中心。
 
-- 构建系统：`maturin`
-- Rust 模块名：`pydsf`
+### 初始化结果说明
+
 - 配置文件位置：
   - 用户配置：`$XDG_CONFIG_HOME/dataspringflow/config.yaml`
   - 全局配置：`/etc/dataspringflow/config.yaml`
-  - 数据文件：`$XDG_DATA_HOME/dataspringflow/dsf.db` 或 `/var/lib/dataspringflow/dsf.db`
+- 数据文件：
+  - 全局注册中心数据库文件:`/var/lib/dataspringflow/dsf.db`
+  - 用户私有注册中心数据库文件:`$XDG_DATA_HOME/dataspringflow/dsf.db`
 
 ---
+
+## 权限模型说明
+
+### 权限模型
+
+本项目由于没有使用复杂的数据库如postgrep、mysql，而是使用了轻量化的嵌入式数据库sqlite,在数据库层面没有原生的用户模型和权限模型，故本项目沿用了linux用户和用户组权限模型，
+并结合acl机制实现了读写权限的控制。
+
+### 普通用户
+
+普通用户对个人的私有注册中心有完全的读写权限，对全局注册中心有只读权限，对其他用户没有任何读写权限。
+
+### DSFadmin用户组
+
+此用户组内用户对其个人的私有注册中心以及全局数据文件夹`/var/lib/dataspringflow/`有读写权限，可以向全局公共注册中心注册公共数据的元数据;
+对普通用户的私有注册中心有只读权限，可以查看系统内个用户都注册了那些数据集,从而计算出全局公共数据集是否被普通用户的私有数据依赖。
 
 ## 用户接口使用说明
 
 ### 1. Python API
 
-#### 初始化服务
+#### 获取服务实例
+
+增删改查及标记数据状态的方法均封装在`DSFService`类中，调用其初始化方法即可自动加载用户配置并实例化相应的服务。
 
 ```python
 from pydsf import DSFService, BackendAddr, DatasetStatus
@@ -152,7 +215,7 @@ for scoped_meta in all_metas:
     print(f"[{backend}] {meta.id()} -> {meta.path}")
 ```
 
-#### 状态标记（高级用法）
+#### 状态标记
 
 ```python
 # 标记数据集为创建中状态
@@ -318,11 +381,12 @@ dsf serve --host 127.0.0.1 --port 3000
 
 ## 最佳实践
 
-1. **版本管理**：让 `tag` 明确表达版本语义，每次数据内容发生实质变化时创建新 tag
+1. **一一对应**：元数据与磁盘实际数据一一对应，派生出新数据是注册新tag,修改数据集并用新版本覆盖旧版本时，删除旧版本的元数据。
 2. **脚本追溯**：保持 `script_path` 可追溯，便于团队理解派生过程
-3. **训练前校验**：在训练前执行 `verify_self` 或 `verify_deep` 确保数据一致性
+3. **使用前校验**：在训练前执行 `verify_self` 或 `verify_deep` 确保数据一致性
 4. **依赖声明**：注册时准确声明 `dependencies`，确保 DAG 完整性
 5. **删除谨慎**：删除前先用 `check_is_referenced` 检查是否有下游依赖
+6. **标记状态**：长时间使用某一数据集时利用mark_status标记对应状态，避免使用期间其他人修改该数据导致并发错误。
 
 ---
 
@@ -346,4 +410,4 @@ DataSpringFlow/
 
 ## 许可证
 
-请参考仓库中的 `LICENSE` 文件。
+本项目采用Apache 2.0许可证，详情参考仓库中的 `LICENSE` 文件。

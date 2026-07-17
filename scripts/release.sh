@@ -14,7 +14,7 @@ if [[ "${0}" != "./scripts/release.sh" && "${0}" != "scripts/release.sh" ]]; the
 fi
 
 DIST_DIR="dist_payload"
-rm -rf "$DIST_DIR" payload.tar.gz ./release/dsf_installer.sh
+rm -rf "$DIST_DIR" payload.tar.gz ./release/dsf_installer_manylinux_2_28_x86_64.sh
 mkdir -p "$DIST_DIR"
 
 echo " [Step 1] Starting manylinux container and compile..."
@@ -62,10 +62,10 @@ cp README.md LICENSE "$DIST_DIR/" || true
 echo "[Step 3] Packing installer script..."
 tar -czf payload.tar.gz -C "$DIST_DIR" .
 mkdir -p release
-cat scripts/install_payload.sh payload.tar.gz >./release/dsf_installer.sh
-chmod +x ./release/dsf_installer.sh
+cat scripts/install_payload.sh payload.tar.gz >./release/dsf_installer_manylinux_2_28_x86_64.sh
+chmod +x ./release/dsf_installer_manylinux_2_28_x86_64.sh
 
-echo "Finished building installer: ./release/dsf_installer.sh"
+echo "Finished building installer: ./release/dsf_installer_manylinux_2_28_x86_64.sh"
 
 echo "[Step 4] Auditing artifacts for sensitive paths..."
 
@@ -92,10 +92,10 @@ for wheel in "./dist_payload/"*.whl; do
   fi
 done
 
-echo "--> Checking dsf_installer.sh..."
-if strings "./release/dsf_installer.sh" | grep -q "$SENSITIVE_PATH"; then
+echo "--> Checking dsf_installer_manylinux_2_28_x86_64.sh..."
+if strings "./release/dsf_installer_manylinux_2_28_x86_64.sh" | grep -q "$SENSITIVE_PATH"; then
   echo "ERROR: Sensitive path found in installer script!"
-  strings "./release/dsf_installer.sh" | grep "$SENSITIVE_PATH" | head -n 5
+  strings "./release/dsf_installer_manylinux_2_28_x86_64.sh" | grep "$SENSITIVE_PATH" | head -n 5
   exit 1
 fi
 
