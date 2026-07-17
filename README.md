@@ -1,224 +1,348 @@
 # DataSpringFlow
 
-面向深度学习场景的数据集元数据管理工具。  
-DataSpringFlow 的核心目标是：**把数据集之间的派生关系组织为 DAG（有向无环图）**，并提供基于哈希的**一致性校验**能力，帮助你在多阶段数据处理流程中稳定管理数据集版本与依赖。
+面向深度学习场景的数据集元数据管理工具。
+DataSpringFlow 的核心目标是：**把数据集之间的派生关系组织为 DAG（有向无环图）**，并提供基于哈希的**一致性校验**能力，帮助您在多阶段数据处理流程中稳定管理数据集版本与依赖。
 
 ---
 
-## Dev Tips
+## 项目简介
 
-### StackBackend 与多后端配置
+### 功能特性
 
-- [x] **StackBackend 核心定义**
-  - 单个后端只提供 SQLite 实现，一个 SQLite 后端为一个实际存储数据的后端实例。
-  - 后端实例分为两类：用户私有后端（在 `XDG_CONFIG_HOME`）和全局公有后端（在全局路径 `/etc` 配置文件 `/var`数据文件，或remote后端）。
-  - 每个公有后端对应一台服务器。
-  - StackBackend 将多个后端（用户私有后端、本机公有后端、可能存在的多个远程公有后端）组合起来，形成虚拟单后端视图。
-  - 用户家目录下的那一个为该用户的唯一私有后端，其他全部为公有后端。
+DataSpringFlow 是一个**轻量级、非侵入式**的数据集元数据管理系统。在各类研究任务中，一个原始数据集往往会经过多次加工，形成多个派生版本（如清洗版、特化版或与其他数据集混合、筛选所得的新数据集）。这些数据集之间天然存在"从上游派生到下游"的依赖关系。
 
-- [x] **多后端配置规范**
-  - 每个后端实例对应一个配置文件。
-  - 每个用户必须有一个私有后端及该私有后端的配置文件。
-  - 配置文件记录该后端的参数：
-    - **属性**：公有 or 私有，DB 文件路径。
-    - **SQLite 参数**：连接池大小、WAL 等等。
-    - **私有后端特有**：还应记录该用户所有可见的公有后端（以 IP 形式记录，本机全局后端为 `local`，远程后端则为具体 IP 地址）。
+DataSpringFlow 把这种关系显式建模为 **DAG（有向无环图）**，并围绕 DAG 提供以下核心能力：
 
-- [x] **权限模型设计**
-  - 全局初始化时创建用户组 `DSFadmin`。
-  - 普通用户对自己的私有后端有完整权限，对所有公有后端有读取权限。
-  - 若用户在 `DSFadmin` 用户组，则对本机公有后端有完整读写权限，对远程公有后端仍然只有读权限。
+1. **元数据统一注册**：使用 `name@tag` 唯一标识数据集，支持注册、查询、列出、删除元数据
+2. **依赖关系追踪**：在注册时声明 `dependencies`，自动构建数据集间的派生关系图
+3. **哈希一致性校验**：
+   - 自身校验（`verify_self`）：校验单个数据集内容是否与登记状态一致
+   - 深度校验（`verify_deep`）：沿依赖链深度校验整个子图的健康状态
+4. **引用检查**：检查某数据集是否被其他数据集引用，防止误删
+5. **Merkle 树支撑**：用于一致性校验结果的底层数据结构
+6. **多后端架构**：支持用户私有后端和全局公有后端的堆叠视图
+7. **Web UI 界面**：提供可视化的数据集浏览、详情查看和依赖拓扑图展示
 
-- [x] 数据状态与一致性标记设计:
-  - [x] 增加MetaData字段status
-  - [x] status对应一个enum，包含free(实际用None表示)（可用）、creating（正在创建）、deleting（正在删除）、modifying（正在修改）、reading（读取并使用）
-  - [x] 增加mark_status(id,status)方法来标记status字段
-  - [x] 所有增删改查方法根据status字段进行判断是否可用
+### 技术特点
 
-- [x] 增加mark_status到DatasetBackend trait
-
-- [x] 前端设计：
-  
-  - 两大部分：首页与详情页
-  - 首页包含一个搜索框，下面就是所有数据一条一条从上到下堆叠起来的卡片。随着搜索，下面的展示卡片不断筛选变少。当进入某一个数据的详情页面之后，左侧的sidebar再显示搜索栏和其他所有数据（相当于小型主页）; 右侧为展示详情页
-  - 详情页（detailed_panel)包含三个部分：元数据详细信息、依赖拓扑图、下游衍生数据集列表
-  - 把detailed_panel设计成一个小型的框架，每个元素抽取出来（目前是详情、依赖拓扑图、下游衍生数据集列表，三个元素），将来再添加元素就另外设计该元素的html然后动态插入到detailed_panel中，
+- **Rust + Python 混合架构**：核心逻辑用 Rust 实现，通过 PyO3 暴露 Python 接口,零python依赖，不会污染您的虚拟环境。
+- **SQLite 后端**：轻量级数据库存储，无常驻进程，不额外占用服务器资源。
+- **BLAKE3 哈希**：高性能加密哈希算法用于数据一致性校验
+- **HTMX + Alpine.js 前端**：现代轻量级 Web 技术栈，无需复杂前端框架
+- **跨后端查询**：支持同时查询私有和全局后端的数据集信息
 
 ---
 
-## 设计目标
+## 安装方式
 
-在实际训练流程中，一个原始数据集往往会经过多次加工，形成多个派生版本,如清洗版、特化版或与其他数据集混合、筛选所得的新数据集。
+### 系统要求
 
-这些数据集之间天然存在“从上游派生到下游”的依赖关系。  
-DataSpringFlow 把这种关系显式建模为 DAG，并围绕 DAG 提供：
-
-1. 元数据统一注册（`name@tag`）
-2. 依赖关系追踪
-3. 哈希一致性校验（自身 + 依赖子图）
-
-## 当前能力概览
-
-- **数据集标识**：使用 `name@tag` 唯一标识数据集
-- **元数据管理**：注册、查询、列出、删除元数据
-- **依赖关系建模**：在注册时声明 `dependencies`
-- **一致性校验**：
-  - 校验单个数据集（self）
-  - 沿依赖链深度校验（deep）
-- **引用检查**：检查某数据集是否被其他数据集引用
-- **Merkle 树相关信息**：用于一致性校验结果支撑（而非删除恢复）
-
-## 安装
+- Python: `>=3.9`
+- Linux/Unix 系统（依赖 XDG 目录规范）
+*若从源码安装则另需rust工具链*
 
 ### 从源码安装
 
 ```bash
+# 克隆仓库
 git clone https://github.com/flyingbucket/DataSpringFlow.git
 cd DataSpringFlow
+
+# 安装 Python 包（自动构建 Rust 扩展）
 pip install -e .
+
+cd rust 
+cargo build --release # 生成dsf cli工具
 ```
 
-## Python 版本与构建
+### 构建说明
 
-- Python: `>=3.9`
 - 构建系统：`maturin`
-- Rust 扩展模块：`dataspringflow.dataspringflow_rs`
+- Rust 模块名：`pydsf`
+- 配置文件位置：
+  - 用户配置：`$XDG_CONFIG_HOME/dataspringflow/config.yaml`
+  - 全局配置：`/etc/dataspringflow/config.yaml`
+  - 数据文件：`$XDG_DATA_HOME/dataspringflow/dsf.db` 或 `/var/lib/dataspringflow/dsf.db`
 
-项目通过 Rust + PyO3 暴露核心能力，Python 侧主要是 API 入口与类型接口。
+---
 
-## 快速开始
+## 用户接口使用说明
+
+### 1. Python API
+
+#### 初始化服务
 
 ```python
-from dataspringflow import DSFService
+from pydsf import DSFService, BackendAddr, DatasetStatus
 
+# 创建服务实例（自动加载配置）
 svc = DSFService()
+```
 
-# 1) 注册一个“根数据集”
+#### 注册数据集
+
+```python
+# 注册一个"根数据集"（无依赖）
 svc.register(
     name="raw_images",
     tag="v1",
     path="/data/raw_images_v1",
     script_path="/workspace/scripts/prepare_raw.py",
-    dependencies=None,           # 或 []
-    description_path=None,
+    owner_nickname="myteam",      # 可选：所有者昵称
+    description_path=None,         # 可选：描述文件路径
+    dependencies=[],               # 可选：依赖列表
+    target_backend=BackendAddr.private(),  # 可选：指定后端
 )
 
-# 2) 注册一个派生数据集（依赖 raw_images@v1）
+# 注册一个派生数据集（依赖 raw_images@v1）
 svc.register(
     name="train_split",
     tag="v1",
     path="/data/train_split_v1",
     script_path="/workspace/scripts/make_train_split.py",
     dependencies=["raw_images@v1"],
+    target_backend=BackendAddr.private(),
 )
-
-# 3) 查询元数据
-meta = svc.query_meta("train_split@v1")
-print(meta.id())          # train_split@v1
-print(meta.path)
-print(meta.dependencies)  # ["raw_images@v1"]
-
-# 4) 校验自身一致性
-res_self = svc.verify_self("train_split@v1", show_diff=True)
-print(res_self.status)
-
-# 5) 深度校验（包含依赖）
-res_deep = svc.verify_deep("train_split@v1", show_diff=True)
-print(res_deep.status, res_deep.dep_status)
-
-# 6) 查看是否被引用
-ref_by = svc.check_is_referenced("raw_images@v1")
-print(ref_by)
-
-# 7) 列出全部元数据
-all_meta = svc.list_all_metadata()
-for m in all_meta:
-    print(m.id(), m.path)
 ```
 
-## 核心对象与接口（当前代码）
+#### 查询元数据
 
-## `DSFService`
+```python
+# 查询单个数据集
+metas = svc.query_meta("train_split@v1")
+for scoped_meta in metas:
+    backend_addr = scoped_meta.backend  # 后端地址
+    meta = scoped_meta.metadata          # 元数据对象
+    print(f"ID: {meta.id()}")
+    print(f"Path: {meta.path}")
+    print(f"Hash: {meta.hash}")
+    print(f"Dependencies: {meta.dependencies}")
+```
 
-服务入口，负责数据集元数据生命周期与校验调用。
+#### 一致性校验
 
-主要方法：
+```python
+# 校验自身一致性
+res_self = svc.verify_self("train_split@v1", show_diff=True)
+print(f"Status: {res_self.status}")  # Healthy, Broken, BrokenDeps, Unverified
 
-- `query_meta(id: str) -> MetaData`
-- `register(name, tag, path, script_path, dependencies=None, description_path=None, force_heal=False, yes=False) -> None`
-- `update_merkle(id: str) -> None`
-- `delete_metadata(id: str, force=False) -> None`
-- `verify_deep(id: str, show_diff=False) -> DataSetVerifyRes`
-- `verify_self(id: str, show_diff=False) -> DataSetVerifyRes`
-- `list_all_metadata() -> list[MetaData]`
-- `check_is_referenced(target_id: str) -> list[str]`
+# 深度校验（包含所有依赖）
+res_deep = svc.verify_deep("train_split@v1", show_diff=True)
+print(f"Dataset Status: {res_deep.status}")
+print(f"Dependency Statuses: {res_deep.dep_status}")
+```
 
-## `MetaData`
+#### 引用检查与删除
 
-当前暴露字段（以实际类型声明为准）：
+```python
+# 检查是否被其他数据集引用
+referrers = svc.check_is_referenced("raw_images@v1")
+print(f"Referenced by: {referrers}")
 
-- `name: str`
-- `tag: str`
-- `hash: str`
-- `path: str`
-- `description_path: str`
-- `script_path: str`
-- `dependencies: list[str]`
-- `merkle_tree_path: str`
+# 删除元数据（不删除实际数据）
+svc.delete_metadata("train_split@v1", force=False)  # force=True 强制删除
+```
 
-方法：
+#### 列出所有数据集
 
-- `id() -> str`（`name@tag`）
+```python
+all_metas = svc.list_all_metadata()
+for scoped_meta in all_metas:
+    backend, meta = scoped_meta
+    print(f"[{backend}] {meta.id()} -> {meta.path}")
+```
 
-## `DatasetStatus`
+#### 状态标记（高级用法）
 
-当前状态枚举：
+```python
+# 标记数据集为创建中状态
+svc.mark_status(
+    id="new_dataset@v1",
+    status=DatasetStatus.BusyCreating,
+    target_backend=BackendAddr.private()
+)
+```
 
-- `Healthy`
-- `Broken`
-- `BrokenDeps`
-- `Unverified`
+---
 
-## `DataSetVerifyRes`
+### 2. CLI 命令行工具
 
-校验结果对象：
+安装后可直接使用 `dsf` 命令：
 
-- `status: DatasetStatus`：目标数据集状态
-- `dep_status: list[DatasetStatus]`：依赖相关状态集合
+#### 初始化配置
 
-## `DSFDataset`
+```bash
+# 用户级初始化（默认）
+dsf init
 
-数据集对象（由底层返回）：
+# 全局初始化（需要 root 权限）
+sudo dsf init --global
+```
 
-- `metadata` 属性
-- `detailed_status` 属性
-- `verify(_backend_auth, _show_diff=False)`
+#### 查看配置
 
-## DAG 组织约定
+```bash
+dsf show-config
+```
 
-DataSpringFlow 的关键约定是：  
-**每个数据集在注册时声明其上游依赖（`dependencies`），形成有向无环图。**
+#### 授予管理员权限
 
-- 节点：数据集（`name@tag`）
-- 边：`child -> parent`（或“当前数据集依赖哪些上游”）
-- 语义：下游可追溯来源，上游变动可影响下游可信度
+```bash
+# 授予指定用户 DSFadmin 权限,<username>参数为空则默认使用$USER环境变量，即当前用户
+dsf grant <username>
+```
 
-建议实践：
+#### 查询数据集状态
 
-1. 让 `tag` 明确表达版本语义（如 `v1`, `v2`, `2026-07`）
-2. 每次数据内容发生实质变化时创建新 tag
-3. 保持 `script_path` 可追溯，便于团队理解派生过程
-4. 在训练前执行 `verify_self` 或 `verify_deep`
+```bash
+# 查询元数据
+dsf query mnist@v1
 
-## 关于哈希与一致性校验
+# 自我校验
+dsf query mnist@v1 --level self-only
 
-当前版本中，哈希能力用于：
+# 深度校验（包含依赖）
+dsf query multimodal@v1 --level deep --show-diff
 
-- 判断数据集内容是否与登记状态一致
-- 辅助定位“当前数据集是否发生变动”
-- 支撑依赖链校验中的健康判断
+# 查询全局注册表
+dsf query imagenet@v1 --global
+```
 
-**不用于**数据删除后自动恢复或重建编排。
+#### 注册数据集
+
+```bash
+dsf register \
+    --name mnist_blurred \
+    --tag v1.0 \
+    --path /data/mnist_blurred \
+    --script-path /scripts/blur.py \
+    --deps mnist@v1.0 \
+    --owner-nickname dev_team
+```
+
+#### 更新哈希
+
+```bash
+# 重新计算并更新数据集哈希
+dsf update mnist@v1
+
+# 更新全局注册表中的数据集
+dsf update mnist@v1 --global
+```
+
+#### 删除数据集
+
+```bash
+# 交互式删除
+dsf delete mnist@v1
+
+# 强制删除（忽略引用检查）
+dsf delete mnist@v1 --force
+
+# 非确认模式
+dsf delete mnist@v1 --yes
+```
+
+#### 启动 Web UI
+
+```bash
+# 默认监听 0.0.0.0:8080
+dsf serve
+
+# 指定地址和端口
+dsf serve --host 127.0.0.1 --port 3000
+```
+
+---
+
+### 3. Web UI 界面
+
+启动 Web 服务后，访问 `http://localhost:8080` 即可使用图形界面。
+
+#### 首页功能
+
+- **搜索框**：支持按名称、标签、所有者搜索数据集
+- **数据集卡片**：显示所有已注册的数据集，点击可进入详情页
+
+#### 工作台（Workspace）
+
+访问 `/workspace?id=name@tag` 进入双栏工作界面：
+
+- **左侧边栏**：
+  - 迷你搜索框：快速筛选数据集列表
+  - 数据集卡片：紧凑展示，点击切换右侧详情
+  - URL 自动同步：切换数据集时更新浏览器地址
+
+- **右侧详情面板**：
+  1. **元数据详细信息**：名称、标签、路径、哈希值、所有者、依赖列表等
+  2. **依赖拓扑图**：可视化展示上游依赖关系（DAG 结构）
+  3. **下游引用列表**：显示哪些数据集依赖了当前数据集
+
+#### 技术特性
+
+- **HTMX 局部刷新**：无需整页重载，点击即更新详情
+- **Alpine.js 交互**：轻量级前端状态管理
+- **响应式设计**：适配不同屏幕尺寸
+
+---
+
+## 核心概念
+
+### 数据集标识
+
+使用 `name@tag` 格式唯一标识数据集：
+
+- `name`：数据集名称（如 `mnist`, `imagenet_subset`）
+- `tag`：版本标签（如 `v1`, `v1.0`, `2026-07`）
+
+### 后端架构
+
+- **私有后端**：每个用户独立的后端，位于用户家目录下
+- **全局后端**：系统级共享后端，位于 `/var/lib/dataspringflow`
+- **StackBackend**：将多个后端组合成虚拟单后端视图
+
+### 权限模型
+
+- 普通用户：对自己的私有后端有完整权限，对全局后端只有读权限
+- DSFadmin 组成员：对本机全局后端有读写权限，对远程全局后端只有读权限
+
+### 状态枚举
+
+- `Healthy`：健康状态
+- `Broken`：数据损坏或不一致
+- `BrokenDeps`：依赖项有问题
+- `Unverified`：未校验状态
+- `BusyCreating/Reading/Modifying/Deleting`：忙碌状态（占用中）
+
+---
+
+## 最佳实践
+
+1. **版本管理**：让 `tag` 明确表达版本语义，每次数据内容发生实质变化时创建新 tag
+2. **脚本追溯**：保持 `script_path` 可追溯，便于团队理解派生过程
+3. **训练前校验**：在训练前执行 `verify_self` 或 `verify_deep` 确保数据一致性
+4. **依赖声明**：注册时准确声明 `dependencies`，确保 DAG 完整性
+5. **删除谨慎**：删除前先用 `check_is_referenced` 检查是否有下游依赖
+
+---
+
+## 项目结构
+
+```
+DataSpringFlow/
+├── rust/                    # Rust 核心代码
+│   ├── dsf-core/           # 核心业务逻辑（后端、服务、DAG）
+│   ├── dsf-py/             # Python 绑定（PyO3）
+│   ├── dsf-cli/            # 命令行工具
+│   ├── dsf-web/            # Web UI 服务
+│   └── dsf-api/            # API 数据类型定义
+├── src/pydsf/              # Python 包入口
+├── examples/               # 使用示例
+├── tests/                  # 测试用例
+└── benchmarks/             # 性能基准测试
+```
+
+---
 
 ## 许可证
 
