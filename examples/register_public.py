@@ -13,8 +13,8 @@ def main():
     # 映射到 Local Global (全局数据库后端)
     global_backend = BackendAddr.local_global()
 
-    base_dir = os.path.abspath("examples/example_data/public")
-    script_dir = os.path.abspath("examples/example_data/scripts")
+    base_dir = os.path.abspath("/data/examples/example_data/public")
+    script_dir = os.path.abspath("/data/examples/example_data/scripts")
     os.makedirs(base_dir, exist_ok=True)
     os.makedirs(script_dir, exist_ok=True)
 
@@ -43,7 +43,7 @@ def main():
     ]
 
     for ds in public_datasets:
-        print(f"\n🚀 === 开始注册公共数据集: {ds['name']}@{ds['tag']} ===")
+        print(f"\n=== 开始注册公共数据集: {ds['name']}@{ds['tag']} ===")
 
         # 0. 生成占位 pipeline bash 脚本
         with open(ds["script_path"], "w") as f:
@@ -82,7 +82,7 @@ def main():
             owner_nickname="public_mirror",
             target_backend=global_backend,
         )
-        print(f"✅ {ds_id} 注册成功！")
+        print(f"{ds_id} 注册成功！")
 
 
 if __name__ == "__main__":

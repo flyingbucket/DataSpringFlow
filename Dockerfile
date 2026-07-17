@@ -53,4 +53,6 @@ RUN echo "source /etc/bash.bashrc" >> /root/.bashrc && \
 # 设置工作目录
 WORKDIR /app
 ENV CARGO_TARGET_DIR="/app/rust/target_container_dev"
+RUN mkdir /data 
+RUN chmod 777 /data
 CMD ["/bin/bash"]

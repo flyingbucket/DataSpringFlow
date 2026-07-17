@@ -16,9 +16,9 @@ def main():
     # 声明私有后端及全局参考后端
     private_backend = BackendAddr.private()
 
-    public_base = os.path.abspath("examples/example_data/public")
-    private_base = os.path.abspath("examples/example_data/private")
-    script_dir = os.path.abspath("examples/example_data/scripts")
+    public_base = os.path.abspath("/data/examples/example_data/public")
+    private_base = os.path.abspath("/data/examples/example_data/private")
+    script_dir = os.path.abspath("/data/examples/example_data/scripts")
 
     os.makedirs(private_base, exist_ok=True)
 
@@ -58,8 +58,8 @@ def main():
     ]
 
     for ds in derivatives:
-        print(f"\n🔒 === 开始注册私有衍生数据集: {ds['name']}@{ds['tag']} ===")
-        print(f"⛓️  依赖链: {ds['dependencies']}")
+        print(f"\n=== 开始注册私有衍生数据集: {ds['name']}@{ds['tag']} ===")
+        print(f"依赖链: {ds['dependencies']}")
 
         # 0. 写入伪 pipeline 脚本
         with open(ds["script_path"], "w") as f:
@@ -100,11 +100,11 @@ def main():
             dependencies=ds["dependencies"],
             target_backend=private_backend,
         )
-        print(f"✅ {ds_id} 在私有后端注册成功！")
+        print(f"{ds_id} 在私有后端注册成功！")
 
     # ================= 拓扑及数据深度校验验证 =================
-    print("\n🔍 ===========================================")
-    print("🚦 启动对 'multimodal_dataset@v1.0' 的深度依赖拓扑校验...")
+    print("\n ===========================================")
+    print(" 启动对 'multimodal_dataset@v1.0' 的深度依赖拓扑校验...")
     print("=============================================")
 
     # 跨后端校验：multimodal_dataset 在 private 中，而 wikitext 和 imagenet 在 global 中
@@ -112,7 +112,7 @@ def main():
         id="multimodal_dataset@v1.0", show_diff=True, target_backend=private_backend
     )
 
-    print(f"\n🎯 校验结果:")
+    print(f"\n 校验结果:")
     print(f"  - 衍生集状态: {verify_res.status}")
     print(f"  - 依赖集状态: {verify_res.dep_status}")
 
