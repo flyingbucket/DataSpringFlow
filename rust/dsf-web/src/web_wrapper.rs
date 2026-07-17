@@ -128,46 +128,60 @@ async fn detailed_panel_ui_handler(
     Query(query): Query<IdQuery>,
     State(service): State<Arc<DSFService>>,
 ) -> impl IntoResponse {
-    // 1. 记录初始请求信息
-    log::debug!("Handling detailed panel request for ID: {}", query.id);
+    log::debug!("[Panel_UI] Handling detailed panel request for ID: {}", query.id);
+    let start_instant = std::time::Instant::now();
 
     match service.query_meta(&query.id, None) {
         Ok(scoped_metas) => {
             if let Some(scoped_meta) = scoped_metas.into_iter().next() {
                 let detail: MetaDetailDto = scoped_meta.1.clone().into();
+                
+                // 记录主元数据查询完成的时间
+                let main_query_elapsed = start_instant.elapsed();
+                log::debug!("[Panel_UI] Main meta query finished in {:?}", main_query_elapsed);
+
                 let mut upstreams = Vec::new();
+                let dep_start = std::time::Instant::now();
                 
                 for dep_id in &detail.dependencies {
-                    // 2. 在循环中针对每个依赖项进行细粒度错误记录
                     match service.query_meta(dep_id, None) {
                         Ok(metas) => {
                             if let Some(scoped_meta) = metas.into_iter().next() {
                                 upstreams.push(DatasetMetaDto {
-                                    id:scoped_meta.1.id(),
-                                    name:scoped_meta.1.name.clone(),
-                                    tag:scoped_meta.1.tag.clone(),
-                                    owner:Some(scoped_meta.1.owner.clone()),
+                                    id: scoped_meta.1.id(),
+                                    name: scoped_meta.1.name.clone(),
+                                    tag: scoped_meta.1.tag.clone(),
+                                    owner: Some(scoped_meta.1.owner.clone()),
                                 });
                             } else {
-                                log::warn!("Dependency not found in registry: {}", dep_id);
+                                log::warn!("[Panel_UI] Dependency not found in registry: {}", dep_id);
                             }
                         },
                         Err(e) => {
-                            // 这里会捕获具体的数据库查询错误
-                            log::error!("Failed to resolve dependency '{}' for dataset '{}': {:?}", dep_id, query.id, e);
+                            log::error!("[Panel_UI] Failed to resolve dependency '{}' for dataset '{}': {:?}", dep_id, query.id, e);
                         }
                     }
                 }
+                
+                let dep_elapsed = dep_start.elapsed();
+                let total_elapsed = start_instant.elapsed();
+                
+                log::debug!(
+                    "[Panel_UI] Total UI render prep: {:?}. (Main Query: {:?}, Resolve {} Deps: {:?})", 
+                    total_elapsed, 
+                    main_query_elapsed, 
+                    detail.dependencies.len(),
+                    dep_elapsed
+                );
 
                 DetailedPanelView { detail, upstreams }.into_response()
             } else {
-                log::info!("Dataset not found: {}", query.id);
+                log::error!("[Panel_UI] Dataset not found: {}", query.id);
                 (StatusCode::NOT_FOUND, "Dataset not found").into_response()
             }
         }
         Err(e) => {
-            // 3. 记录主查询错误
-            log::error!("Database query failed for ID '{}': {:?}", query.id, e);
+            log::error!("[Panel_UI] Database query failed for ID '{}' after {:?}: {:?}", query.id, start_instant.elapsed(), e);
             (StatusCode::INTERNAL_SERVER_ERROR, format!("Query failed: {e}")).into_response()
         },
     }
@@ -227,18 +241,40 @@ async fn dependency_graph_handler(
     Query(query): Query<GraphQuery>,
     State(service): State<Arc<DSFService>>,
 ) -> impl IntoResponse {
+    log::debug!("[DAG_API] Received request for root_id: '{}'", query.root_id);
+    let start_instant = std::time::Instant::now();
     match service.query_dependency_graph(&query.root_id) {
         Ok(dataset_graph) => {
+            let db_elapsed = start_instant.elapsed();
+
+            let convert_start = std::time::Instant::now();
             let web_graph: WebGraphResponse = dataset_graph.into();
+            let convert_elapsed = convert_start.elapsed();
+            let total_elapsed = start_instant.elapsed();
+
+            log::debug!(
+                "[DAG_API] Success! Total: {:?}, DB/Algorithm: {:?}, Serialization: {:?}", 
+                total_elapsed, 
+                db_elapsed, 
+                convert_elapsed
+            );
             (StatusCode::OK, Json(web_graph)).into_response()
         }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ 
-                "error": format!("Failed to build DAG for '{}': {e}", query.root_id) 
-            })),
-        )
-            .into_response(),
+        Err(e) => {
+            log::error!(
+                "[DAG_API] Failed to build DAG for '{}' after {:?}: {:?}", 
+                query.root_id, 
+                start_instant.elapsed(), 
+                e
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ 
+                    "error": format!("Failed to build DAG for '{}': {e}", query.root_id) 
+                })),
+            )
+                .into_response()
+        }
     }
 }
 

@@ -217,12 +217,13 @@ impl DSFService {
     }
 
     pub fn query_dependency_graph(&self, root_id: &str) -> Result<DatasetGraph, anyhow::Error> {
-        log::info!("building graph...");
+        log::debug!("[Query_Dep_Graph] initializing graph...");
         let graph = DatasetGraph::from_root(root_id, &self.backend)?;
-        log::info!("graph built successfully!!");
-        log::info!("checking cycle in graph...");
+        log::debug!("[Query_Dep_Graph] graph built successfully!");
+        log::debug!("[Query_Dep_Graph] checking cycle in graph...");
         graph.check_cycle()?;
-        log::info!("graph cycle checked successfully!!");
+        log::debug!("[Query_Dep_Graph] graph cycle checked successfully!");
+        log::info!("[Query_Dep_Graph] Successfully built dependency_graph!");
         Ok(graph)
     }
 }
