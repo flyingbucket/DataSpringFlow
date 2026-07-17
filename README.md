@@ -39,6 +39,8 @@ DataSpringFlow 把这种关系显式建模为 **DAG（有向无环图）**，并
 
 - Python: `>=3.9`
 - Linux/Unix 系统（依赖 XDG 目录规范）
+- acl权限控制工具（setfalc,getfacl）
+
 *若从源码安装则另需rust工具链*
 
 ### 安装预编译版本
