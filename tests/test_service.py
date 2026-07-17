@@ -33,7 +33,7 @@ class TestDSFService(unittest.TestCase):
         # 使用 Private 后端用于隔离测试
         self.backend = BackendAddr.private()
 
-        self.dataset_name = "mnist"
+        self.dataset_name = "test"
         self.dataset_tag = "v1.0"
         self.dataset_id = f"{self.dataset_name}@{self.dataset_tag}"
 
@@ -134,8 +134,8 @@ class TestDSFService(unittest.TestCase):
 
     def test_5_check_is_referenced(self):
         """5. 测试依赖引用检查 (Graph Reference)"""
-        # 注册一个下游数据集，其依赖于上面的 mnist
-        downstream_name = "mnist_processed"
+        # 注册一个下游数据集，其依赖于上面的 test
+        downstream_name = "test_processed"
         downstream_tag = "v1.0"
 
         self.service.register(
@@ -151,11 +151,11 @@ class TestDSFService(unittest.TestCase):
             tag=downstream_tag,
             path=self.dummy_path,
             script_path=self.dummy_script,
-            dependencies=[self.dataset_id],  # 依赖 mnist@v1.0
+            dependencies=[self.dataset_id],  # 依赖 test@v1.0
             target_backend=self.backend,
         )
 
-        # 检查是谁引用了 mnist@v1.0
+        # 检查是谁引用了 test@v1.0
         referenced_by = self.service.check_is_referenced(target_id=self.dataset_id)
         self.assertIsInstance(referenced_by, list)
         self.assertGreater(len(referenced_by), 0)
