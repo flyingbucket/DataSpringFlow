@@ -14,8 +14,6 @@
     </div>
 </div>
 
-<script src="/assets/vis-network.min.js"></script>
-
 <script>
 (function() {
     const rootId = "{{ detail.id }}";
@@ -29,6 +27,9 @@
         setTimeout(() => { toast.style.display = 'none'; }, 3000);
     }
 
+    // 获取当前网页实际计算出的字体名称，不要直接传 var(--xxx) 给 Canvas
+    const computedFontFamily = getComputedStyle(document.body).fontFamily || 'sans-serif';
+
     // 根据后端返回的 status 映射节点样式与配色
     function mapNodeStyle(node) {
         let color = { background: '#fafafa', border: '#8c8c8c', highlight: { background: '#f5f5f5', border: '#595959' } };
@@ -36,9 +37,12 @@
 
         // 获取当前节点是否是当前主面板所查的 root 节点
         const isRoot = node.id === rootId;
-        const borderWith = isRoot ? 3 : 1.5;
+        const borderWidth = isRoot ? 3 : 1.5;
 
-        switch (node.status) {
+        // 核心修复 1：把状态字符串统一转化为小写，并去除连接符，彻底解决 Rust 序列化大小写匹配缺失的问题
+        const rawStatus = String(node.status || "").toLowerCase().replace(/_/g, "");
+
+        switch (rawStatus) {
             case "healthy":
                 color = { background: '#f6ffed', border: '#b7eb8f', highlight: { background: '#e6f7ff', border: '#52c41a' } };
                 labelEmoji = "🟢";
@@ -47,7 +51,7 @@
                 color = { background: '#fff1f0', border: '#ffa39e', highlight: { background: '#e6f7ff', border: '#ff4d4f' } };
                 labelEmoji = "🔴";
                 break;
-            case "broken_deps":
+            case "brokendeps": // 同时兼容 "broken_deps" 和 "BrokenDeps"
                 color = { background: '#fffbe6', border: '#ffe58f', highlight: { background: '#e6f7ff', border: '#faad14' } };
                 labelEmoji = "🟡";
                 break;
@@ -56,8 +60,7 @@
                 labelEmoji = "⚪";
                 break;
             default:
-                // 匹配所有 "busy_reading", "busy_modifying", "busy_deleting", "busy_creating" 等繁忙状态
-                if (node.status.startsWith("busy")) {
+                if (rawStatus.startsWith("busy")) {
                     color = { background: '#e6f7ff', border: '#91d5ff', highlight: { background: '#bae7ff', border: '#1890ff' } };
                     labelEmoji = "⚡";
                 }
@@ -69,13 +72,14 @@
             label: `${labelEmoji} ${node.id}\n👤 ${node.owner || 'System'}`,
             shape: 'box',
             margin: 10,
-            borderWidth: borderWith,
+            borderWidth: borderWidth,
             color: color,
             font: {
-                color: 'var(--pico-color)',
-                face: 'var(--pico-font-family)',
+                // 核心修复 2：因为所有背景色均是浅色底，这里一定要显式指定为深黑色 (#222222)，切勿在 Canvas 里用 var(--pico-color)！
+                color: '#222222',
+                face: computedFontFamily,
                 size: 13,
-                bold: isRoot ? { color: 'var(--pico-color)', size: 14 } : false
+                bold: isRoot ? { color: '#000000', size: 14 } : false
             },
             shapeProperties: {
                 borderRadius: 6
@@ -90,26 +94,19 @@
             return response.json();
         })
         .then(data => {
-            // 保存节点 ID 集合用于后续跳转存在性判断
             const validNodeIds = new Set(data.nodes.map(n => n.id));
-
-            // 处理节点
             const visNodes = data.nodes.map(mapNodeStyle);
-
-            // 处理边
             const visEdges = data.edges.map(edge => ({
-                from: edge.source,
-                to: edge.target,
+                from: edge.target,
+                to: edge.source,
                 arrows: 'to',
-                color: { color: 'var(--pico-muted-border-color)', highlight: '#1890ff' },
+                color: { color: '#8c8c8c', highlight: '#1890ff' }, // 边线颜色也同步换为实色，防止暗黑模式下隐形
                 width: 1.5
             }));
 
             const networkData = { nodes: visNodes, edges: visEdges };
             const options = {
-                nodes: {
-                    shadow: true
-                },
+                nodes: { shadow: true },
                 edges: {
                     smooth: {
                         type: 'cubicBezier',
@@ -118,13 +115,11 @@
                     }
                 },
                 physics: {
-                    hierarchicalRepulsion: {
-                        nodeDistance: 180
-                    }
+                    hierarchicalRepulsion: { nodeDistance: 180 }
                 },
                 layout: {
                     hierarchical: {
-                        direction: 'UD', // 从上至下的树状排列
+                        direction: 'UD',
                         sortMethod: 'directed'
                     }
                 },
@@ -137,17 +132,12 @@
 
             const network = new vis.Network(container, networkData, options);
 
-            // 4. 点击交互处理
             network.on("click", function(params) {
                 if (params.nodes.length > 0) {
                     const clickedNodeId = params.nodes[0];
-
-                    // 检查该节点在拓扑数据中是否存在
                     if (validNodeIds.has(clickedNodeId)) {
-                        // 存在，跳转到其详情页
                         window.location.href = `/workspace?id=${encodeURIComponent(clickedNodeId)}`;
                     } else {
-                        // 不存在（可能是悬空或有问题的节点，拦截并报警）
                         showToast(`❌ Dataset "${clickedNodeId}" does not exist in registry!`);
                     }
                 }
@@ -155,7 +145,7 @@
         })
         .catch(err => {
             console.error(err);
-            container.innerHTML = `<div style="display:flex; justify-content:center; align-items:center; height:100%; color:var(--pico-form-element-invalid-active-border-color);">Failed to render dependency topology: ${err.message}</div>`;
+            container.innerHTML = `<div style="display:flex; justify-content:center; align-items:center; height:100%; color:#ff4d4f;">Failed to render dependency topology: ${err.message}</div>`;
         });
 })();
 </script>

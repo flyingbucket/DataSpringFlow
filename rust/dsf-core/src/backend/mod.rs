@@ -198,7 +198,7 @@ pub fn capture_backtrace() {
             ));
         }
 
-        log::debug!("Filtered Backtrace (Python-style):\n{}", filtered_backtrace);
+        log::debug!(target: "backtrace","Filtered Backtrace (Python-style):\n{}", filtered_backtrace);
     }
 }
 
