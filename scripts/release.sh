@@ -64,5 +64,39 @@ tar -czf payload.tar.gz -C "$DIST_DIR" .
 mkdir -p release
 cat scripts/install_payload.sh payload.tar.gz >./release/dsf_installer.sh
 chmod +x ./release/dsf_installer.sh
-rm -rf "$DIST_DIR" payload.tar.gz
+
 echo "Finished building installer: ./release/dsf_installer.sh"
+
+echo "[Step 4] Auditing artifacts for sensitive paths..."
+
+SENSITIVE_PATH="/home/flyingbucket"
+
+echo "--> Checking dsf binary..."
+if strings "./dist_payload/dsf" | grep -q "$SENSITIVE_PATH"; then
+  echo "ERROR: Sensitive path found in binary!"
+  strings "./dist_payload/dsf" | grep "$SENSITIVE_PATH" | head -n 5
+  exit 1
+fi
+echo "--> Checking wheels..."
+for wheel in "./dist_payload/"*.whl; do
+  if [ -f "$wheel" ]; then
+    if ! unzip -l "$wheel" >/dev/null; then
+      echo "ERROR: Corrupt wheel file detected: $wheel"
+      exit 1
+    fi
+    if strings "$wheel" | grep -q "$SENSITIVE_PATH"; then
+      echo "ERROR: Sensitive path found in wheel: $wheel"
+      strings "$wheel" | grep "$SENSITIVE_PATH" | head -n 5
+      exit 1
+    fi
+  fi
+done
+
+echo "--> Checking dsf_installer.sh..."
+if strings "./release/dsf_installer.sh" | grep -q "$SENSITIVE_PATH"; then
+  echo "ERROR: Sensitive path found in installer script!"
+  strings "./release/dsf_installer.sh" | grep "$SENSITIVE_PATH" | head -n 5
+  exit 1
+fi
+
+echo "--> Audit passed: No sensitive paths detected."
