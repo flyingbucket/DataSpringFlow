@@ -128,35 +128,50 @@ async fn detailed_panel_ui_handler(
     Query(query): Query<IdQuery>,
     State(service): State<Arc<DSFService>>,
 ) -> impl IntoResponse {
+    // 1. 记录初始请求信息
+    log::debug!("Handling detailed panel request for ID: {}", query.id);
+
     match service.query_meta(&query.id, None) {
         Ok(scoped_metas) => {
             if let Some(scoped_meta) = scoped_metas.into_iter().next() {
                 let detail: MetaDetailDto = scoped_meta.1.clone().into();
-                
                 let mut upstreams = Vec::new();
                 
                 for dep_id in &detail.dependencies {
-                    if let Ok(metas) = service.query_meta(dep_id, None) 
-                        && let Some(scoped_meta) = metas.into_iter().next() {
-                            upstreams.push(DatasetMetaDto {
-                                id: format!("{}@{}", scoped_meta.1.name, scoped_meta.1.tag),
-                                name: scoped_meta.1.name.clone(),
-                                tag: scoped_meta.1.tag.clone(),
-                                owner: Some(scoped_meta.1.owner.clone()),
-                            });
+                    // 2. 在循环中针对每个依赖项进行细粒度错误记录
+                    match service.query_meta(dep_id, None) {
+                        Ok(metas) => {
+                            if let Some(scoped_meta) = metas.into_iter().next() {
+                                upstreams.push(DatasetMetaDto {
+                                    id:scoped_meta.1.id(),
+                                    name:scoped_meta.1.name.clone(),
+                                    tag:scoped_meta.1.tag.clone(),
+                                    owner:Some(scoped_meta.1.owner.clone()),
+                                });
+                            } else {
+                                log::warn!("Dependency not found in registry: {}", dep_id);
+                            }
+                        },
+                        Err(e) => {
+                            // 这里会捕获具体的数据库查询错误
+                            log::error!("Failed to resolve dependency '{}' for dataset '{}': {:?}", dep_id, query.id, e);
                         }
-                    
+                    }
                 }
 
                 DetailedPanelView { detail, upstreams }.into_response()
             } else {
+                log::info!("Dataset not found: {}", query.id);
                 (StatusCode::NOT_FOUND, "Dataset not found").into_response()
             }
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Query failed: {e}")).into_response(),
+        Err(e) => {
+            // 3. 记录主查询错误
+            log::error!("Database query failed for ID '{}': {:?}", query.id, e);
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Query failed: {e}")).into_response()
+        },
     }
 }
-
 /// UI 处理器 D：HTMX 延迟加载：查询并局部渲染下游引用数据集
 async fn referrers_ui_handler(
     Query(query): Query<IdQuery>,

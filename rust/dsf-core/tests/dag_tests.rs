@@ -1,60 +1,120 @@
-mod common;
-#[cfg(feature = "run_slow_tests")]
 #[cfg(test)]
 mod tests {
-    use super::common::{MemoryBackend, TestSandbox};
-    use dsf_core::backend::DatasetBackend;
-    use dsf_core::core::MetaData;
+    use dsf_core::backend::{StackedBackend, build_backend_auto};
+    use dsf_core::core::DataSetStatus;
     use dsf_core::dag::*;
+    use dsf_core::service::{DSFService, RegisterOptions};
+    use std::path::PathBuf;
 
-    /// 辅助函数：根据邻接关系在 MemoryBackend 中注册一组 Mock MetaData
-    fn setup_mock_backend(
-        backend: &MemoryBackend,
-        sandbox: &TestSandbox,
-        nodes: &[(&str, &str, &[&str])],
-    ) {
-        for (name, tag, deps) in nodes {
-            // 在沙盒磁盘中生成真实 dummy 目录
-            let folder_name = format!("{}_{}", name, tag);
-            let ds_path = sandbox.create_dummy_dataset(&folder_name, "dummy-data");
+    /// RAII 容器测试沙盒：以 DSFAdmin 身份，通过真实的 DSFService 接口注册 Mock 数据集，
+    /// 并在作用域结束或发生断言 panic 时，自动调用服务接口逆序回收所有写入的数据。
+    pub(crate) struct TestSandbox {
+        service: DSFService,
+        backend: StackedBackend,
+        registered_ids: Vec<String>,
+        workspace_dir: PathBuf,
+    }
 
-            // 将描述文件路径和脚本路径包装进 Some() 中以匹配 Option<PathBuf>
-            let meta = MetaData::new(
-                name,
-                tag,
-                ds_path.clone(),
-                Some(ds_path.join("desc.md")),
-                ds_path.join("script.py"),
-                None,
-                deps.iter().map(|s| s.to_string()).collect(),
-                ds_path.join("merkle.bin"),
-                None,
+    impl TestSandbox {
+        pub(crate) fn new(test_name: &str) -> Self {
+            let backend_for_service = build_backend_auto()
+                .expect("Failed to initialize auto backend for service in container");
+            let backend_for_dag = build_backend_auto()
+                .expect("Failed to initialize auto backend for dag in container");
+            let service = DSFService::new(backend_for_service);
+
+            // 在容器可写分区创建当前测试专属的物理工作目录
+            let workspace_dir = std::env::temp_dir()
+                .join("dsf_admin_container_tests")
+                .join(test_name);
+            let _ = std::fs::remove_dir_all(&workspace_dir);
+            std::fs::create_dir_all(&workspace_dir)
+                .expect("Failed to create workspace directory in container");
+
+            Self {
+                service,
+                backend: backend_for_dag,
+                registered_ids: Vec::new(),
+                workspace_dir,
+            }
+        }
+
+        /// 使用 DSFService 官方接口注册一个真实的 Mock 数据集
+        pub(crate) fn register_mock(&mut self, name: &str, tag: &str, deps: &[&str]) {
+            let ds_dir = self.workspace_dir.join(format!("{}_{}", name, tag));
+            std::fs::create_dir_all(&ds_dir).expect("Failed to create dataset dir");
+
+            // 写入基础物理文件，确保通过 ensure_exists 与 MerkleTree 哈希计算
+            let data_file = ds_dir.join("data.bin");
+            std::fs::write(&data_file, format!("mock real data for {}@{}", name, tag))
+                .expect("Failed to write mock data file");
+
+            let script_path = ds_dir.join("run.py");
+            std::fs::write(&script_path, "#!/usr/bin/env python3\nprint('mock script')")
+                .expect("Failed to write script file");
+
+            let desc_path = ds_dir.join("desc.md");
+            std::fs::write(
+                &desc_path,
+                format!("# Dataset {}@{}\nMock description", name, tag),
             )
-            .expect("Failed to create MetaData instance");
+            .expect("Failed to write description file");
 
-            backend
-                .save_metadata(&meta)
-                .expect("Failed to save metadata to mock backend");
+            let opts = RegisterOptions {
+                name: name.to_string(),
+                tag: tag.to_string(),
+                path: ds_dir,
+                description_path: Some(desc_path),
+                script_path,
+                owner_nickname: Some("DSFAdmin".to_string()),
+                dependencies: deps.iter().map(|s| s.to_string()).collect(),
+                force_heal: true, // 开启强制自愈，确保批量注册时不会因为依赖状态阻断
+            };
+
+            self.service.register(opts, None).unwrap_or_else(|e| {
+                panic!("DSFService failed to register {}@{}: {:?}", name, tag, e)
+            });
+
+            self.registered_ids.push(format!("{}@{}", name, tag));
+        }
+
+        /// 主动删除特定 Mock 数据集并从追踪列表中移除
+        pub(crate) fn delete_mock(&mut self, id: &str) {
+            let _ = self.service.delete_metadata(id, true, None);
+            self.registered_ids.retain(|x| x != id);
+        }
+
+        pub(crate) fn service(&self) -> &DSFService {
+            &self.service
+        }
+
+        pub(crate) fn backend(&self) -> &StackedBackend {
+            &self.backend
+        }
+    }
+
+    impl Drop for TestSandbox {
+        fn drop(&mut self) {
+            // 严格按照注册的逆序（从顶层下游向底层依赖）依次调服务接口删除，防止触发引用依赖锁
+            for id in self.registered_ids.iter().rev() {
+                let _ = self.service.delete_metadata(id, true, None);
+            }
+            // 彻底清理测试在磁盘生成的物理文件
+            let _ = std::fs::remove_dir_all(&self.workspace_dir);
         }
     }
 
     #[test]
     fn test_from_root_and_cycle_ok_for_acyclic_graph() {
-        let sandbox = TestSandbox::new("acyclic_graph");
-        let backend = MemoryBackend::new();
+        let mut sandbox = TestSandbox::new("acyclic_graph");
 
-        setup_mock_backend(
-            &backend,
-            &sandbox,
-            &[
-                ("A", "v1", &["B@v1", "C@v1"]),
-                ("B", "v1", &["D@v1"]),
-                ("C", "v1", &[]),
-                ("D", "v1", &[]),
-            ],
-        );
+        // 严格遵循自底向上注册策略：基础依赖 C 和 D 必须最先通过 DSFService 注册
+        sandbox.register_mock("C", "v1", &[]);
+        sandbox.register_mock("D", "v1", &[]);
+        sandbox.register_mock("B", "v1", &["D@v1"]);
+        sandbox.register_mock("A", "v1", &["B@v1", "C@v1"]);
 
-        let graph_res = DatasetGraph::from_root("A@v1", &backend);
+        let graph_res = DatasetGraph::from_root("A@v1", sandbox.backend());
         assert!(
             graph_res.is_ok(),
             "Failed to load graph from root: {:?}",
@@ -73,85 +133,75 @@ mod tests {
 
     #[test]
     fn test_cycle_detects_simple_cycle() {
-        let sandbox = TestSandbox::new("simple_cycle");
-        let backend = MemoryBackend::new();
+        let mut sandbox = TestSandbox::new("simple_cycle");
 
-        // 构造环: A@v1 -> B@v1 -> A@v1
-        setup_mock_backend(
-            &backend,
-            &sandbox,
-            &[("A", "v1", &["B@v1"]), ("B", "v1", &["A@v1"])],
+        // 正常构建单向合法依赖：A@v1 -> B@v1
+        sandbox.register_mock("B", "v1", &[]);
+        sandbox.register_mock("A", "v1", &["B@v1"]);
+
+        // 使用 from_root_with_deps 在内存图结构中动态注入反向边 (B@v1 -> A@v1) 形成环。
+        // 这样既能精准验证 DAG 核心算法，又不会让非法环形依赖破坏 SQLite 真实后端的完整性。
+        let graph_res =
+            DatasetGraph::from_root_with_deps("B", "v1", &["A@v1".to_string()], sandbox.backend());
+        assert!(
+            graph_res.is_ok(),
+            "Memory graph construction should succeed"
         );
 
-        // 🌟 修复 2：因为 from_root 返回的是 std::io::Result，它不会返回 DatasetGraphError。
-        // 如果 from_root 内部碰到了环导致失败，它会返回 std::io::Error。
-        let graph_res = DatasetGraph::from_root("A@v1", &backend);
-
-        match graph_res {
-            Ok(graph) => {
-                let cycle_res = graph.check_cycle();
-                match cycle_res {
-                    // check_cycle() 返回的是 DatasetGraphError
-                    Err(DatasetGraphError::CycleDetected { node, dep }) => {
-                        let pairs = [(node.as_str(), dep.as_str()), (dep.as_str(), node.as_str())];
-                        assert!(pairs.contains(&("A@v1", "B@v1")));
-                    }
-                    _ => panic!(
-                        "Expected CycleDetected from check_cycle, got: {:?}",
-                        cycle_res
-                    ),
-                }
+        let graph = graph_res.unwrap();
+        match graph.check_cycle() {
+            Err(DatasetGraphError::CycleDetected { node, dep }) => {
+                let pairs = [(node.as_str(), dep.as_str()), (dep.as_str(), node.as_str())];
+                assert!(
+                    pairs.contains(&("A@v1", "B@v1")),
+                    "Unexpected cycle pair: {} -> {}",
+                    node,
+                    dep
+                );
             }
-            Err(io_err) => {
-                // 如果你的 from_root 在自底向上构建时就通过 io::Error 拦截了环
-                // 我们通过识别它的错误副文本来断言成功
-                let err_msg = io_err.to_string();
-                assert!(err_msg.contains("A@v1") || err_msg.contains("B@v1"));
-            }
+            other => panic!("Expected CycleDetected from check_cycle, got: {:?}", other),
         }
     }
 
     #[test]
     fn test_cycle_detects_self_cycle() {
-        let sandbox = TestSandbox::new("self_cycle");
-        let backend = MemoryBackend::new();
+        let mut sandbox = TestSandbox::new("self_cycle");
+        sandbox.register_mock("A", "v1", &[]);
 
-        setup_mock_backend(&backend, &sandbox, &[("A", "v1", &["A@v1"])]);
+        // 试图向图结构中注入自环依赖：A@v1 -> A@v1
+        let graph_res =
+            DatasetGraph::from_root_with_deps("A", "v1", &["A@v1".to_string()], sandbox.backend());
+        assert!(graph_res.is_ok());
 
-        let graph_res = DatasetGraph::from_root("A@v1", &backend);
-
-        // 🌟 修复 3：统一 match 两臂的错误形态，不混用 io::Error 和 DatasetGraphError
-        match graph_res {
-            Ok(graph) => match graph.check_cycle() {
-                Err(DatasetGraphError::CycleDetected { node, dep }) => {
-                    assert_eq!(node, "A@v1");
-                    assert_eq!(dep, "A@v1");
-                }
-                _ => panic!("Expected self-loop CycleDetected from check_cycle"),
-            },
-            Err(io_err) => {
-                assert!(io_err.to_string().contains("A@v1"));
+        let graph = graph_res.unwrap();
+        match graph.check_cycle() {
+            Err(DatasetGraphError::CycleDetected { node, dep }) => {
+                assert_eq!(node, "A@v1");
+                assert_eq!(dep, "A@v1");
             }
+            other => panic!(
+                "Expected self-loop CycleDetected from check_cycle, got: {:?}",
+                other
+            ),
         }
     }
 
     #[test]
-    fn test_topo_sort_order() {
-        let sandbox = TestSandbox::new("topo_sort");
-        let backend = MemoryBackend::new();
+    fn test_topo_sort_and_verify_subgraph() {
+        let mut sandbox = TestSandbox::new("topo_sort");
+        sandbox.register_mock("C", "v1", &[]);
+        sandbox.register_mock("B", "v1", &["C@v1"]);
+        sandbox.register_mock("A", "v1", &["B@v1"]);
 
-        setup_mock_backend(
-            &backend,
-            &sandbox,
-            &[
-                ("A", "v1", &["B@v1"]),
-                ("B", "v1", &["C@v1"]),
-                ("C", "v1", &[]),
-            ],
+        let mut graph = DatasetGraph::from_root("A@v1", sandbox.backend()).unwrap();
+        let verify_res = graph.verify_subgraph("A@v1", false);
+
+        assert!(
+            verify_res.is_ok(),
+            "Deep subgraph verification failed: {:?}",
+            verify_res.err()
         );
-
-        // 🌟 修复 4：加下划线 `_graph` 消除无意义的变量未消费警告
-        let _graph = DatasetGraph::from_root("A@v1", &backend).unwrap();
+        assert_eq!(verify_res.unwrap().status, DataSetStatus::Healthy);
     }
 
     #[test]
@@ -163,87 +213,72 @@ mod tests {
     }
 }
 
-#[cfg(feature = "run_slow_tests")]
 #[cfg(test)]
-mod memory_backend_status_tests {
-    use crate::common::MemoryBackend;
-    use dsf_core::backend::{BackendError, DatasetBackend};
-    use dsf_core::core::{DataSetBusyStatus, MetaData};
-    use std::path::PathBuf;
+mod service_status_tests {
+    use super::tests::TestSandbox;
+    use dsf_core::core::DataSetBusyStatus;
 
-    /// 辅助函数：快速生成一个用于测试的纯内存 MetaData 实例
-    fn create_test_metadata(name: &str, tag: &str) -> MetaData {
-        MetaData {
-            name: name.to_string(),
-            tag: tag.to_string(),
-            hash: "mockhash_deadbeef12345".to_string(),
-            path: PathBuf::from(format!("/mock/path/{}", name)),
-            description_path: PathBuf::from(format!("/mock/path/{}/desc.md", name)),
-            script_path: PathBuf::from(format!("/mock/path/{}/run.py", name)),
-            owner: "tester$nobody".to_string(),
-            dependencies: vec![],
-            merkle_tree_path: PathBuf::from(format!("/mock/path/{}/merkle.bin", name)),
-            busy_status: None, // 初始为空闲状态
-        }
+    #[test]
+    fn test_service_mark_status_success() {
+        let mut sandbox = TestSandbox::new("status_success");
+        sandbox.register_mock("imagenet", "v1", &[]);
+        let id = "imagenet@v1";
+
+        // 1. 验证通过 DSFService 成功标记为 Reading 状态
+        sandbox
+            .service()
+            .mark_status(id, DataSetBusyStatus::Reading, None)
+            .expect("Failed to mark status as Reading via DSFService");
+
+        let queried = sandbox
+            .service()
+            .query_meta(id, None)
+            .expect("Failed to query metadata");
+        assert_eq!(queried[0].1.busy_status, Some(DataSetBusyStatus::Reading));
+
+        // 2. 验证状态覆盖：切换为 Deleting 状态
+        sandbox
+            .service()
+            .mark_status(id, DataSetBusyStatus::Deleting, None)
+            .expect("Failed to mark status as Deleting via DSFService");
+
+        let queried_again = sandbox
+            .service()
+            .query_meta(id, None)
+            .expect("Failed to query metadata again");
+
+        assert_eq!(
+            queried_again[0].1.busy_status,
+            Some(DataSetBusyStatus::Deleting)
+        );
     }
 
     #[test]
-    fn test_memory_backend_mark_status_success() {
-        let backend = MemoryBackend::new();
-        let meta = create_test_metadata("imagenet", "v1");
-        let id = meta.id(); // 标准形式如 "imagenet@v1"
-
-        // 将元数据持久化存入内存 Map
-        backend.save_metadata(&meta).unwrap();
-
-        // 1. 验证成功标记为 Reading 状态
-        backend
-            .mark_status(&id, DataSetBusyStatus::Reading)
-            .unwrap();
-        let updated = backend.get_metadata(&id).unwrap();
-        assert_eq!(updated.busy_status, Some(DataSetBusyStatus::Reading));
-
-        // 2. 验证状态覆盖：切换为更严重的 Deleting 状态
-        backend
-            .mark_status(&id, DataSetBusyStatus::Deleting)
-            .unwrap();
-        let updated_again = backend.get_metadata(&id).unwrap();
-        assert_eq!(updated_again.busy_status, Some(DataSetBusyStatus::Deleting));
-    }
-
-    #[test]
-    fn test_memory_backend_mark_status_not_found() {
-        let backend = MemoryBackend::new();
+    fn test_service_mark_status_not_found() {
+        let sandbox = TestSandbox::new("status_not_found");
         let fake_id = "non_existent_dataset@v99.0";
 
-        // 尝试为一个根本没有被 save_metadata 注入过的数据集打标
-        let res = backend.mark_status(fake_id, DataSetBusyStatus::Modifying);
+        // 尝试为一个未通过 service 注册的虚假 ID 打标
+        let res = sandbox
+            .service()
+            .mark_status(fake_id, DataSetBusyStatus::Modifying, None);
 
-        // 断言：必须返回严格的错误类型
-        assert!(res.is_err(), "对不存在的ID打标应当返回 Err 分支");
-        match res.unwrap_err() {
-            BackendError::DatasetNotFound { id } => {
-                assert_eq!(id, fake_id);
-            }
-            other => panic!(
-                "应当返回 BackendError::DatasetNotFound，但得到了: {:?}",
-                other
-            ),
-        }
+        assert!(res.is_err(), "对不存在的ID打标应当被底层拦截并返回 Err");
     }
 
     #[test]
-    fn test_memory_backend_mark_status_after_deletion() {
-        let backend = MemoryBackend::new();
-        let meta = create_test_metadata("mnist", "v2");
-        let id = meta.id();
+    fn test_service_mark_status_after_deletion() {
+        let mut sandbox = TestSandbox::new("status_after_deletion");
+        sandbox.register_mock("mnist", "v2", &[]);
+        let id = "mnist@v2";
 
-        // 存储后随即删除
-        backend.save_metadata(&meta).unwrap();
-        backend.delete_metadata(&id).unwrap();
+        // 主动调用 API 删除该数据集
+        sandbox.delete_mock(id);
 
-        // 已经从后端解绑清除的数据集，对其修改状态应当同样被拦截
-        let res = backend.mark_status(&id, DataSetBusyStatus::Creating);
-        assert!(res.is_err(), "已被彻底删除的 ID 不允许更新状态");
+        // 已从全局后注销的数据集，必须阻断任何状态更新请求
+        let res = sandbox
+            .service()
+            .mark_status(id, DataSetBusyStatus::Creating, None);
+        assert!(res.is_err(), "已被彻底删除的数据集 ID 不允许更新状态");
     }
 }

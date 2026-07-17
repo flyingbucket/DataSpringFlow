@@ -39,9 +39,3 @@ pub struct DetailedMetaView {
 pub struct ReferrersView {
     pub referrers: Vec<ReferrerDto>,
 }
-
-// #[derive(Template, WebTemplate)]
-// #[template(path = "components/dependency_dag.html")]
-// pub struct DependencyDagView {
-//     pub root_id: String,
-// }
