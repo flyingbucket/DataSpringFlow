@@ -97,8 +97,8 @@
             const validNodeIds = new Set(data.nodes.map(n => n.id));
             const visNodes = data.nodes.map(mapNodeStyle);
             const visEdges = data.edges.map(edge => ({
-                from: edge.source,
-                to: edge.target,
+                from: edge.target,
+                to: edge.source,
                 arrows: 'to',
                 color: { color: '#8c8c8c', highlight: '#1890ff' }, // 边线颜色也同步换为实色，防止暗黑模式下隐形
                 width: 1.5
