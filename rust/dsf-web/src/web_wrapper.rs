@@ -199,7 +199,7 @@ async fn referrers_ui_handler(
         for s_id in scoped_ids {
             referrers.push(ReferrerDto {
                 backend_name: s_id.0.to_string(),
-                referrer_id: s_id.to_string(), 
+                referrer_id: s_id.1.clone(), 
             });
         }
     }
@@ -323,7 +323,7 @@ async fn check_referenced_handler(
                 .map(|s_id| {
                     ReferrerDto {
                         backend_name: s_id.0.to_string(),
-                        referrer_id: s_id.to_string(), 
+                        referrer_id: s_id.1.clone(), 
                     }
                 })
                 .collect();
