@@ -771,13 +771,13 @@
 
 <details class="example" open>
   <summary>Example</summary>
-  <p><code>python
- service = DSFService()
- # Erect fence -&gt; mutate disk -&gt; seal changes -&gt; tear down fence
- service.mark_status("data@v1", BusyStatus.Modifying)
- # ... modify disk files ...
- service.update_merkle("data@v1")
- service.mark_status("data@v1", BusyStatus.Free)</code></p>
+  <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a> <span class="n">service</span> <span class="o">=</span> <span class="n">DSFService</span><span class="p">()</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a> <span class="c1"># Erect fence -&gt; mutate disk -&gt; seal changes -&gt; tear down fence</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a> <span class="n">service</span><span class="o">.</span><span class="n">mark_status</span><span class="p">(</span><span class="s2">&quot;data@v1&quot;</span><span class="p">,</span> <span class="n">BusyStatus</span><span class="o">.</span><span class="n">Modifying</span><span class="p">)</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a> <span class="c1"># ... modify disk files ...</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a> <span class="n">service</span><span class="o">.</span><span class="n">update_merkle</span><span class="p">(</span><span class="s2">&quot;data@v1&quot;</span><span class="p">)</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a> <span class="n">service</span><span class="o">.</span><span class="n">mark_status</span><span class="p">(</span><span class="s2">&quot;data@v1&quot;</span><span class="p">,</span> <span class="n">BusyStatus</span><span class="o">.</span><span class="n">Free</span><span class="p">)</span>
+</span></code></pre></div>
 </details>
 
 
@@ -1327,12 +1327,13 @@ while mutating disk files or computing Merkle trees.</p>
     </table>
 
 
-<p><span class="doc-section-title">Examples:</span></p>
-    <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">metas</span> <span class="o">=</span> <span class="n">service</span><span class="o">.</span><span class="n">query_meta</span><span class="p">(</span><span class="s2">&quot;imagenet@v1.0&quot;</span><span class="p">)</span>
+<details class="example" open>
+  <summary>Example</summary>
+  <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">metas</span> <span class="o">=</span> <span class="n">service</span><span class="o">.</span><span class="n">query_meta</span><span class="p">(</span><span class="s2">&quot;imagenet@v1.0&quot;</span><span class="p">)</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">if</span> <span class="n">metas</span><span class="p">:</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Dataset found.&quot;</span><span class="p">)</span>
 </span></code></pre></div>
-
+</details>
 
     </div>
 
@@ -1776,10 +1777,10 @@ busy status, verification short-circuits to report the lock without hashing.</p>
 
 <details class="example" open>
   <summary>Example</summary>
-  <p><code>python
- res = service.verify_deep("clean_corpus@v1.0")
- if res.status == DatasetStatus.Healthy:
-     print("DAG verified and ready.")</code>python</p>
+  <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a> <span class="n">res</span> <span class="o">=</span> <span class="n">service</span><span class="o">.</span><span class="n">verify_deep</span><span class="p">(</span><span class="s2">&quot;clean_corpus@v1.0&quot;</span><span class="p">)</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a> <span class="k">if</span> <span class="n">res</span><span class="o">.</span><span class="n">status</span> <span class="o">==</span> <span class="n">DatasetStatus</span><span class="o">.</span><span class="n">Healthy</span><span class="p">:</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>     <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;DAG verified and ready.&quot;</span><span class="p">)</span>
+</span></code></pre></div>
 </details>
 
     </div>
@@ -1913,10 +1914,10 @@ busy status, verification short-circuits to report the lock without hashing.</p>
 
 <details class="example" open>
   <summary>Example</summary>
-  <p><code>python
- res = service.verify_self("clean_corpus@v1.0")
- if res.status == DatasetStatus.Healthy:
-     print("Disk data is verified and safe for concurrent read.")</code>python</p>
+  <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a> <span class="n">res</span> <span class="o">=</span> <span class="n">service</span><span class="o">.</span><span class="n">verify_self</span><span class="p">(</span><span class="s2">&quot;clean_corpus@v1.0&quot;</span><span class="p">)</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a> <span class="k">if</span> <span class="n">res</span><span class="o">.</span><span class="n">status</span> <span class="o">==</span> <span class="n">DatasetStatus</span><span class="o">.</span><span class="n">Healthy</span><span class="p">:</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>     <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Disk data is verified and safe for concurrent read.&quot;</span><span class="p">)</span>
+</span></code></pre></div>
 </details>
 
     </div>
@@ -2065,9 +2066,9 @@ busy status, verification short-circuits to report the lock without hashing.</p>
 
 <details class="example" open>
   <summary>Example</summary>
-  <p><code>python
- meta = service.query_meta("imagenet@v1.0")[0].metadata
- print(f"Dataset path: {meta.path}")</code></p>
+  <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a> <span class="n">meta</span> <span class="o">=</span> <span class="n">service</span><span class="o">.</span><span class="n">query_meta</span><span class="p">(</span><span class="s2">&quot;imagenet@v1.0&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">metadata</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a> <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Dataset path: </span><span class="si">{</span><span class="n">meta</span><span class="o">.</span><span class="n">path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span></code></pre></div>
 </details>
 
 
@@ -2129,9 +2130,9 @@ busy status, verification short-circuits to report the lock without hashing.</p>
 
 <details class="example" open>
   <summary>Example</summary>
-  <p><code>python
- meta = service.query_meta("imagenet@v1.0")[0].metadata
- assert meta.id() == "imagenet@v1.0"</code></p>
+  <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a> <span class="n">meta</span> <span class="o">=</span> <span class="n">service</span><span class="o">.</span><span class="n">query_meta</span><span class="p">(</span><span class="s2">&quot;imagenet@v1.0&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">metadata</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a> <span class="k">assert</span> <span class="n">meta</span><span class="o">.</span><span class="n">id</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;imagenet@v1.0&quot;</span>
+</span></code></pre></div>
 </details>
 
     </div>
