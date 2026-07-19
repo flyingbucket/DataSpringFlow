@@ -1,56 +1,59 @@
 from __future__ import annotations
-from typing import Any, List, Optional
+from enum import Enum
+from typing import Any, Optional
 
 class DatasetStatus:
-    """Enumeration representing the lifecycle and concurrency state of a dataset.
+    """Represents the overall health or verification status of a dataset.
 
-    Beyond overall health tracking, its busy variants (`Busy*`) serve as a lightweight
-    concurrency fence (栅栏机制) for long-running disk operations. Marking a dataset
-    as busy before prolonged file access (e.g., model training, data cleaning)
-    prevents concurrent workers from interfering or triggering redundant hash verifications.
-
-    Variants:
-        Healthy: File contents match Merkle tree and all dependencies are healthy.
-        Broken: Current disk file Merkle hash does not match stored records.
-        BrokenDeps: Self hash is correct, but one or more dependencies are broken.
-        Unverified: Default state when loaded from disk before verification runs.
-        NotBusy: Dataset is not used now.
-        BusyReading: Dataset is locked by an ongoing read (e.g., epoch training).
-        BusyModifying: Dataset is locked by an ongoing file mutation or cleaning task.
-        BusyDeleting: Dataset is locked by an ongoing deletion process.
-        BusyCreating: Dataset is locked during an initial large-scale registration.
-
-    Example:
-        >>> # Erect a read fence before a multi-hour model training task
-        >>> service.mark_status("imagenet@v1.0", DatasetStatus.BusyReading)
-        >>> try:
-        ...     run_long_training_epoch("./data/imagenet")  # Heavy disk read
-        >>> finally:
-        ...     # Tear down the fence once training completes
-        ...     service.mark_status("imagenet@v1.0", DatasetStatus.Healthy)
+    Attributes:
+        Healthy: Dataset is intact, verified, and free of corruption.
+        Broken: Dataset files have failed verification or are missing.
+        BrokenDeps: Target dataset is fine, but one or more upstream dependencies are broken.
+        Unverified: Dataset has been registered or modified but not yet verified.
     """
 
     Healthy: DatasetStatus
     Broken: DatasetStatus
     BrokenDeps: DatasetStatus
     Unverified: DatasetStatus
-    NotBusy: DatasetStatus
-    BusyReading: DatasetStatus
-    BusyModifying: DatasetStatus
-    BusyDeleting: DatasetStatus
-    BusyCreating: DatasetStatus
+
+    def __eq__(self, other: Any) -> bool: ...
+
+class BusyStatus(int, Enum):
+    """Represents the active concurrency fence state of a dataset.
+
+    Used to lock datasets during disk operations to prevent race conditions
+    and concurrent modification conflicts across storage backends.
+
+    Attributes:
+        Free: Dataset is idle and available for reading or writing.
+        Reading: Dataset is actively being read by one or more processes.
+        Modifying: Dataset files are currently being modified on disk.
+        Deleting: Dataset files or metadata are in the process of being deleted.
+        Creating: Dataset is currently being generated or initially written.
+
+    Example:
+        >>> service = DSFService()
+        >>> service.mark_status("data@v1", BusyStatus.Modifying)
+    """
+
+    Free = 0
+    Reading = 1
+    Modifying = 2
+    Deleting = 3
+    Creating = 4
 
 class DataSetVerifyRes:
     """Result of a dataset verification operation.
 
     Attributes:
-        status: The overall health or concurrency status of the target dataset.
-        dep_status: A list containing the health status of direct and indirect dependencies.
+        status: The primary health or concurrency status of the target dataset.
+        dep_status: A list containing the health statuses of direct and indirect dependencies.
 
     Example:
         >>> res = service.verify_deep("nlp_corpus@v2.0")
-        >>> if res.status == DatasetStatus.BusyModifying:
-        ...     print("Fence active: Upstream dataset is currently being mutated!")
+        >>> if res.status == DatasetStatus.Broken:
+        ...     print("Dataset corruption detected!")
     """
 
     status: DatasetStatus
@@ -69,6 +72,8 @@ class DataSetVerifyRes:
         """
         ...
 
+    def __repr__(self) -> str: ...
+
 class MetaData:
     """Metadata snapshot representing a registered dataset in DataSpringFlow.
 
@@ -82,12 +87,10 @@ class MetaData:
         owner: The username or nickname of the dataset owner (formatted as "user$nick").
         dependencies: List of formatted dataset IDs ("name@tag") that this depends on.
         merkle_tree_path: String path to the serialized Merkle tree file.
-        busy_status: Optional active concurrency fence state (e.g., BusyReading).
 
     Example:
         >>> meta = service.query_meta("imagenet@v1.0")[0].metadata
-        >>> if meta.busy_status:
-        ...     print(f"Dataset is currently locked: {meta.busy_status}")
+        >>> print(f"Dataset path: {meta.path}")
     """
 
     name: str
@@ -112,14 +115,7 @@ class MetaData:
         """
         ...
 
-    def __repr__(self) -> str:
-        """Returns a string representation of the metadata.
-
-        Example:
-            >>> meta = service.query_meta("imagenet@v1.0")[0].metadata
-            >>> print(repr(meta))
-        """
-        ...
+    def __repr__(self) -> str: ...
 
 class BackendAddr:
     """Represents the address and connection mode of a DataSpringFlow backend.
@@ -172,6 +168,8 @@ class BackendAddr:
         """
         ...
 
+    def __repr__(self) -> str: ...
+
 class ScopedMetaData:
     """A wrapper containing dataset metadata paired with its corresponding backend source.
 
@@ -181,9 +179,8 @@ class ScopedMetaData:
 
     Example:
         >>> scoped = service.query_meta("imagenet@v1.0")[0]
-        >>> print(f"Found in {scoped.backend}, fence: {scoped.metadata.busy_status}")
+        >>> print(f"Found in {scoped.backend}")
     """
-
     @property
     def backend(self) -> BackendAddr: ...
     @property
@@ -201,7 +198,6 @@ class ScopedId:
         >>> refs = service.check_is_referenced("base_data@v1.0")
         >>> print([ref.id for ref in refs])
     """
-
     @property
     def backend(self) -> BackendAddr: ...
     @property
@@ -217,9 +213,8 @@ class DSFDataset:
 
     Example:
         >>> # Typically managed internally by DSFService during verification
-        >>> print(f"Current concurrency fence: {dataset.detailed_status.status}")
+        >>> print(f"Current verification status: {dataset.detailed_status.status}")
     """
-
     @property
     def metadata(self) -> MetaData: ...
     @property
@@ -233,10 +228,6 @@ class DSFDataset:
 
         Raises:
             RuntimeError: Always raised. Recommendation is to use `DSFService.verify_deep`.
-
-        Example:
-            >>> # Do not call directly; use service.verify_deep() instead.
-            >>> pass
         """
         ...
 
@@ -251,7 +242,10 @@ class DSFService:
     Example:
         >>> service = DSFService()
         >>> # Erect fence -> mutate disk -> seal changes -> tear down fence
-        >>> service.mark_status("data@v1", DatasetStatus.BusyModifying)
+        >>> service.mark_status("data@v1", BusyStatus.Modifying)
+        >>> # ... modify disk files ...
+        >>> service.update_merkle("data@v1")
+        >>> service.mark_status("data@v1", BusyStatus.Free)
     """
 
     def __init__(self) -> None:
@@ -267,7 +261,7 @@ class DSFService:
 
     def query_meta(
         self, id: str, target_backend: Optional[BackendAddr] = None
-    ) -> List[ScopedMetaData]:
+    ) -> list[ScopedMetaData]:
         """Queries metadata for a specific dataset identifier across backends.
 
         Args:
@@ -279,8 +273,8 @@ class DSFService:
 
         Example:
             >>> metas = service.query_meta("imagenet@v1.0")
-            >>> if metas and not metas[0].metadata.busy_status:
-            ...     print("Dataset is free and ready for disk operations.")
+            >>> if metas:
+            ...     print("Dataset found.")
         """
         ...
 
@@ -291,7 +285,7 @@ class DSFService:
         path: str,
         script_path: str,
         owner_nickname: Optional[str] = None,
-        dependencies: Optional[List[str]] = None,
+        dependencies: Optional[list[str]] = None,
         description_path: Optional[str] = None,
         target_backend: Optional[BackendAddr] = None,
         force_heal: bool = False,
@@ -312,6 +306,9 @@ class DSFService:
             target_backend: Optional backend destination for saving.
             force_heal: If True, forces healing existing broken dependency records.
 
+        Raises:
+            RuntimeError: If dataset registration or initialization fails.
+
         Example:
             >>> service.register(
             ...     name="clean_corpus", tag="v1.0",
@@ -326,18 +323,21 @@ class DSFService:
     ) -> None:
         """Recalculates and seals the Merkle tree hash for a registered dataset.
 
-        Essential step before releasing a `BusyModifying` concurrency fence. It commits
-        the new disk state to storage so subsequent verifications return `Healthy`.
+        Essential step before releasing a `BusyStatus.Modifying` concurrency fence.
+        It commits the new disk state to storage so subsequent verifications return `Healthy`.
 
         Args:
             id: The dataset identifier ("name@tag").
             target_backend: Optional target backend where the dataset resides.
 
+        Raises:
+            RuntimeError: If recalculating or saving the Merkle tree fails.
+
         Example:
-            >>> service.mark_status("corpus@v1", DatasetStatus.BusyModifying)
-            >>> run_data_cleaning_pipeline("./data/corpus")  # Alter disk files
-            >>> service.update_merkle("corpus@v1")  # Seal new Merkle tree
-            >>> service.mark_status("corpus@v1", DatasetStatus.Healthy)
+            >>> service.mark_status("corpus@v1", BusyStatus.Modifying)
+            >>> # Alter disk files...
+            >>> service.update_merkle("corpus@v1")
+            >>> service.mark_status("corpus@v1", BusyStatus.Free)
         """
         ...
 
@@ -350,15 +350,18 @@ class DSFService:
         """Deletes a dataset's metadata records from the specified database.
 
         To ensure safety during long cleanup tasks, consider marking the dataset with
-        `BusyDeleting` before removing physical disk files or unregistering metadata.
+        `BusyStatus.Deleting` before removing physical disk files or unregistering metadata.
 
         Args:
             id: The dataset identifier to delete.
             force: If True, forces deletion even if downstream datasets depend on this.
             target_backend: Optional target backend to execute deletion against.
 
+        Raises:
+            RuntimeError: If deletion fails or if dependencies exist without force=True.
+
         Example:
-            >>> service.mark_status("old_data@v0.1", DatasetStatus.BusyDeleting)
+            >>> service.mark_status("old_data@v0.1", BusyStatus.Deleting)
             >>> import shutil; shutil.rmtree("./data/old_data")  # Remove disk files
             >>> service.delete_metadata("old_data@v0.1", force=True)
         """
@@ -383,10 +386,13 @@ class DSFService:
         Returns:
             A `DataSetVerifyRes` with the state of target and all dependencies.
 
+        Raises:
+            RuntimeError: If the deep verification process fails to execute.
+
         Example:
             >>> res = service.verify_deep("clean_corpus@v1.0")
-            >>> if res.status == DatasetStatus.BusyModifying:
-            ...     print("Hold off: Upstream dependency is currently being modified!")
+            >>> if res.status == DatasetStatus.Healthy:
+            ...     print("DAG verified and ready.")
         """
         ...
 
@@ -399,7 +405,7 @@ class DSFService:
         """Performs verification strictly on target dataset, ignoring upstream states.
 
         Short-circuits immediately if the dataset is under an active concurrency fence
-        (such as `BusyModifying`), avoiding collisions with ongoing disk IO.
+        (such as `BusyStatus.Modifying`), avoiding collisions with ongoing disk IO.
 
         Args:
             id: The dataset identifier to verify.
@@ -409,6 +415,9 @@ class DSFService:
         Returns:
             A `DataSetVerifyRes` containing only the health of target dataset.
 
+        Raises:
+            RuntimeError: If self verification process fails to execute.
+
         Example:
             >>> res = service.verify_self("clean_corpus@v1.0")
             >>> if res.status == DatasetStatus.Healthy:
@@ -416,22 +425,18 @@ class DSFService:
         """
         ...
 
-    def list_all_metadata(self) -> List[ScopedMetaData]:
+    def list_all_metadata(self) -> list[ScopedMetaData]:
         """Lists all dataset metadata registered across available backends.
 
         Returns:
             A list of all discovered `ScopedMetaData` objects.
 
-        Example:
-            >>> active_fences = [
-            ...     s.metadata.id() for s in service.list_all_metadata()
-            ...     if s.metadata.busy_status
-            ... ]
-            >>> print(f"Currently locked datasets: {active_fences}")
+        Raises:
+            IOError: If querying the backend databases fails.
         """
         ...
 
-    def check_is_referenced(self, target_id: str) -> List[ScopedId]:
+    def check_is_referenced(self, target_id: str) -> list[ScopedId]:
         """Finds all downstream datasets that depend on the specified dataset.
 
         Args:
@@ -439,6 +444,9 @@ class DSFService:
 
         Returns:
             A list of `ScopedId` objects representing dependent datasets.
+
+        Raises:
+            IOError: If querying the backend graph fails.
 
         Example:
             >>> refs = service.check_is_referenced("raw_corpus@v1.0")
@@ -450,42 +458,26 @@ class DSFService:
     def mark_status(
         self,
         id: str,
-        status: DatasetStatus,
+        status: BusyStatus,
         target_backend: Optional[BackendAddr] = None,
     ) -> None:
-        """Manually sets a concurrency fence by marking a dataset's busy status.
+        """Sets or releases a concurrency fence (busy status) on a target dataset.
 
-        Crucial safeguard when a worker needs prolonged exclusive access to actual
-        disk files (e.g., long model training, data generation, or bulk deletion).
-
-        Note:
-            Only busy states (`BusyReading`, `BusyModifying`, `BusyDeleting`,
-            `BusyCreating`) are permitted when marking status manually.
+        Essential for preventing concurrent modification collisions or race conditions
+        while mutating disk files or computing Merkle trees.
 
         Args:
-            id: The target dataset identifier ("name@tag").
-            status: The target status enum to set. Must be a busy status variant.
-            target_backend: Optional target backend where the dataset resides.
+            id: The dataset identifier ("name@tag").
+            status: The target concurrency status (e.g., BusyStatus.Modifying or BusyStatus.Free).
+            target_backend: Optional specific backend to execute against.
+
+        Raises:
+            RuntimeError: If setting the status in the target storage backend fails.
 
         Example:
-            >>> # Lock dataset before mutating disk files
-            >>> service.mark_status("data@v1", DatasetStatus.BusyModifying)
-            >>> # ... execute hours of data processing ...
-            >>> service.update_merkle("data@v1")  # Seals changes & restores Healthy
-        """
-        ...
-
-    def query_dependency_graph(self, root_id: str) -> Any:
-        """Queries and verifies the topological dependency graph (DAG) for a dataset.
-
-        Args:
-            root_id: The dataset identifier to use as the root of the graph.
-
-        Returns:
-            An internal DatasetGraph representation object.
-
-        Example:
-            >>> dag = service.query_dependency_graph("pipeline_output@v2.0")
-            >>> print("DAG built without cycle or concurrency fence collisions.")
+            >>> service.mark_status("data@v1", BusyStatus.Modifying)
+            >>> # Perform disk modifications...
+            >>> service.update_merkle("data@v1")
+            >>> service.mark_status("data@v1", BusyStatus.Free)
         """
         ...
