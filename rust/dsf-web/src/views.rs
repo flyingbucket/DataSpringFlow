@@ -32,7 +32,6 @@ pub struct DetailedMetaView {
     pub detail: MetaDetailDto,
     pub upstreams: Vec<DatasetMetaDto>,
 }
-
 // 下游引用列表局部视图
 #[derive(Template, WebTemplate)]
 #[template(path = "components/referrer.html")]

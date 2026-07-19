@@ -6,7 +6,7 @@ impl From<MetaData> for MetaDetailDto {
     fn from(meta: MetaData) -> Self {
         let id = format!("{}@{}", meta.name, meta.tag);
 
-        let busy_status = meta.busy_status.map(|status| status.as_str().to_string());
+        let busy_status = meta.busy_status.as_str().to_string();
 
         Self {
             id,

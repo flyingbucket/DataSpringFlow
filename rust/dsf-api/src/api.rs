@@ -18,7 +18,7 @@ pub struct MetaDetailDto {
     pub owner: String,
     pub dependencies: Vec<String>,
     pub merkle_tree_path: String,
-    pub busy_status: Option<String>,
+    pub busy_status: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

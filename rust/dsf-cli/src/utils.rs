@@ -21,6 +21,7 @@ pub(crate) fn fmt_query(s: DataSetStatus) -> String {
         DataSetStatus::Unverified => "Unverified".normal().to_string(),
 
         DataSetStatus::Busy(busy) => match busy {
+            DataSetBusyStatus::Free => format!("{}", "Free".cyan()),
             DataSetBusyStatus::Reading => format!("Occupied({})", busy.as_str().cyan()),
             DataSetBusyStatus::Modifying | DataSetBusyStatus::Creating => {
                 format!("Occupied({})", busy.as_str().magenta())

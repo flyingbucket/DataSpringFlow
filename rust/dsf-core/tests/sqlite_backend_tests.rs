@@ -1,6 +1,6 @@
 use dsf_core::backend::DatasetBackend;
 use dsf_core::backend::{SqliteBackend, SqliteConfig};
-use dsf_core::core::MetaData;
+use dsf_core::core::{DataSetBusyStatus, MetaData};
 use std::path::PathBuf;
 use tempfile::tempdir;
 
@@ -16,7 +16,7 @@ fn create_dummy_metadata(name: &str, tag: &str) -> MetaData {
         owner: "mockuser$nobody".to_string(),
         dependencies: vec!["base_dataset@v1.0".to_string(), "labels@v2.0".to_string()],
         merkle_tree_path: PathBuf::from(format!("/mock/merkle/{}.bincode", name)),
-        busy_status: None,
+        busy_status: DataSetBusyStatus::Free,
     }
 }
 
@@ -190,27 +190,21 @@ fn test_mark_status_success_and_overwrite() {
 
     // 1. 验证初始状态为 None
     let fetched = backend.get_metadata(&id).unwrap();
-    assert_eq!(fetched.busy_status, None);
+    assert_eq!(fetched.busy_status, DataSetBusyStatus::Free);
 
     // 2. 测试成功标记为 Reading 状态
     backend
         .mark_status(&id, DataSetBusyStatus::Reading)
         .expect("标记 Reading 失败");
     let fetched_reading = backend.get_metadata(&id).unwrap();
-    assert_eq!(
-        fetched_reading.busy_status,
-        Some(DataSetBusyStatus::Reading)
-    );
+    assert_eq!(fetched_reading.busy_status, DataSetBusyStatus::Reading);
 
     // 3. 测试状态覆盖切换：从 Reading 变更为 Deleting
     backend
         .mark_status(&id, DataSetBusyStatus::Deleting)
         .expect("覆盖标记 Deleting 失败");
     let fetched_deleting = backend.get_metadata(&id).unwrap();
-    assert_eq!(
-        fetched_deleting.busy_status,
-        Some(DataSetBusyStatus::Deleting)
-    );
+    assert_eq!(fetched_deleting.busy_status, DataSetBusyStatus::Deleting);
 }
 
 #[test]

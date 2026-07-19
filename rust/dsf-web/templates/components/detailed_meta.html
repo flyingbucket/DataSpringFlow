@@ -21,11 +21,11 @@
             <div>
                 <small class="secondary" style="display: block; font-size: 0.75rem; text-transform: uppercase;">Busy Status</small>
                 <span>
-                    {% if let Some(status) = detail.busy_status %}
-                        <mark>{{ status }}</mark>
-                    {% else %}
-                        <span class="secondary" style="font-style: italic;">Idle</span>
-                    {% endif %}
+                  {% if detail.busy_status == "free" %}
+                      <span class="secondary" style="font-style: italic;">Free</span>
+                  {% else %}
+                      {{ detail.busy_status }}
+                  {% endif %}
                 </span>
             </div>
 

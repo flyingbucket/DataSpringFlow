@@ -195,13 +195,16 @@ impl DatasetBackend for SqliteBackend {
             .transaction()
             .map_err(|e| BackendError::StorageError { source: e })?;
 
-        let status_str = status.as_str();
+        let status_param = match status {
+            DataSetBusyStatus::Free => None,
+            other => Some(other.as_str()),
+        };
 
         //TODO: if rows_affected>1, fatual error happened in sqlite database db file
         let rows_affected = tx
             .execute(
                 "UPDATE datasets SET busy_status = ?1 WHERE id = ?2",
-                rusqlite::params![status_str, id],
+                rusqlite::params![status_param, id],
             )
             .map_err(|e| BackendError::StorageError { source: e })?;
 
@@ -259,12 +262,16 @@ impl DatasetBackend for SqliteBackend {
             BackendError::DatasetNotFound { id: id.to_string() }
         })?;
 
-        let busy_status = busy_status_str.and_then(|s| {
-            s.parse::<DataSetBusyStatus>().ok().or_else(|| {
-                log::error!("Unknown busy status from database: {}", s);
-                None
-            })
-        });
+        let busy_status = match busy_status_str {
+            Some(s) => s.parse::<DataSetBusyStatus>().unwrap_or_else(|_| {
+                log::error!(
+                    "Unknown busy status from database: {}, falling back to Free",
+                    s
+                );
+                DataSetBusyStatus::Free
+            }),
+            None => DataSetBusyStatus::Free,
+        };
         let dependencies: Vec<String> = serde_json::from_str(&dependencies_json).map_err(|e| {
             capture_backtrace();
             BackendError::SerializationError {
@@ -289,7 +296,10 @@ impl DatasetBackend for SqliteBackend {
     fn save_metadata(&self, metadata: &MetaData) -> BackendResult<()> {
         let mut conn = self.conn()?;
 
-        let busy_status_str = metadata.busy_status.map(|s| s.as_str());
+        let busy_status_param = match metadata.busy_status {
+            DataSetBusyStatus::Free => None,
+            other => Some(other.as_str()),
+        };
         let deps_json = serde_json::to_string(&metadata.dependencies).map_err(|e| {
             capture_backtrace();
             BackendError::SerializationError {
@@ -330,7 +340,7 @@ impl DatasetBackend for SqliteBackend {
                 metadata.owner,
                 deps_json,
                 metadata.merkle_tree_path.to_string_lossy(),
-                busy_status_str,
+                busy_status_param,
             ],
         )?;
 
@@ -400,12 +410,17 @@ impl DatasetBackend for SqliteBackend {
                             Box::new(e),
                         )
                     })?;
-                let busy_status = busy_status_str.and_then(|s| {
-                    s.parse::<DataSetBusyStatus>().ok().or_else(|| {
-                        log::error!("Unknown busy status from database: {}", s);
-                        None
-                    })
-                });
+
+                let busy_status = match busy_status_str {
+                    Some(s) => s.parse::<DataSetBusyStatus>().unwrap_or_else(|_| {
+                        log::error!(
+                            "Unknown busy status from database: {}, falling back to Free",
+                            s
+                        );
+                        DataSetBusyStatus::Free
+                    }),
+                    None => DataSetBusyStatus::Free,
+                };
                 Ok(MetaData {
                     name,
                     tag,
