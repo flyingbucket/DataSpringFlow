@@ -1,0 +1,21 @@
+site_name: DataSpringFlow Python API Documentation
+theme:
+  name: material
+  palette:
+    scheme: slate
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_root_heading: true
+            show_source: false
+
+nav:
+  - Home: index.md
+  - Guide & Examples: examples.md
+  - API Reference: api.md
