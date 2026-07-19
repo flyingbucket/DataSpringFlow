@@ -74,6 +74,7 @@ impl PyDSFService {
     }
 
     /// Update merkle tree hash for a dataset
+    #[pyo3(signature = (id, target_backend=None))]
     pub fn update_merkle(&self, id: &str, target_backend: Option<PyBackendAddr>) -> PyResult<()> {
         let backend_ref = target_backend.as_ref().map(|py_addr| &py_addr.inner);
         self.inner
