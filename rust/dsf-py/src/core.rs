@@ -1,6 +1,7 @@
 use dsf_core::core::{DSFDataSet, DataSetBusyStatus, DataSetStatus, DataSetVerifyRes, MetaData};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
+use pyo3::types::PyType;
 use serde::Serialize;
 use std::fmt;
 
@@ -79,6 +80,53 @@ impl From<PyDataSetBusyStatus> for DataSetBusyStatus {
             PyDataSetBusyStatus::Deleting => DataSetBusyStatus::Deleting,
             PyDataSetBusyStatus::Creating => DataSetBusyStatus::Creating,
         }
+    }
+}
+
+#[pymethods]
+impl PyDataSetStatus {
+    // 1. 显式导出静态属性（Class Attributes），让 Python 能够访问 DatasetStatus.Healthy 等
+    #[classattr]
+    #[allow(non_upper_case_globals)]
+    const Healthy: Self = PyDataSetStatus {
+        inner: DataSetStatus::Healthy,
+    };
+
+    #[classattr]
+    #[allow(non_upper_case_globals)]
+    const Broken: Self = PyDataSetStatus {
+        inner: DataSetStatus::Broken,
+    };
+
+    #[classattr]
+    #[allow(non_upper_case_globals)]
+    const BrokenDeps: Self = PyDataSetStatus {
+        inner: DataSetStatus::BrokenDeps,
+    };
+
+    #[classattr]
+    #[allow(non_upper_case_globals)]
+    const Unverified: Self = PyDataSetStatus {
+        inner: DataSetStatus::Unverified,
+    };
+
+    // 2. 提供一个构造类方法来生成带参数的 Busy 状态：DatasetStatus.Busy(BusyStatus.Modifying)
+    #[classmethod]
+    #[pyo3(name = "Busy")]
+    fn busy(_cls: &Bound<'_, PyType>, status: PyDataSetBusyStatus) -> Self {
+        PyDataSetStatus {
+            inner: DataSetStatus::Busy(status.into()),
+        }
+    }
+
+    // 3. 必须实现 __eq__，否则 Python 中的 `res.status == DatasetStatus.Healthy` 无法正常比对
+    fn __eq__(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+
+    // 4. 实现 __repr__ 让终端打印错误日志时更易读
+    fn __repr__(&self) -> String {
+        format!("{:?}", self.inner)
     }
 }
 
