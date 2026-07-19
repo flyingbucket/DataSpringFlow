@@ -279,11 +279,12 @@ impl DSFDataSet {
         show_diff: bool,
         dep_statuses: &[DataSetStatus],
     ) -> io::Result<DataSetVerifyRes> {
-        if let busy = self.metadata.busy_status
-            && busy != DataSetBusyStatus::Reading
-        {
+        if !matches!(
+            self.metadata.busy_status,
+            DataSetBusyStatus::Free | DataSetBusyStatus::Reading
+        ) {
             let detailed_status = DataSetVerifyRes {
-                status: DataSetStatus::Busy(busy),
+                status: DataSetStatus::Busy(self.metadata.busy_status),
                 dep_status: dep_statuses.to_vec(),
             };
             self.detailed_status = detailed_status.clone();
