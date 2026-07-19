@@ -1,0 +1,2 @@
+createSrcSidebar('[["dsf",["",[],["main.rs"]]],["dsf_api",["",[],["api.rs","lib.rs"]]],["dsf_cli",["",[],["cli.rs","lib.rs","utils.rs"]]],["dsf_core",["",[["backend",[],["mod.rs","remote_backend.rs","router.rs","sqlite_backend.rs"]]],["config.rs","convert_api.rs","core.rs","dag.rs","lib.rs","merkle.rs","service.rs","utils.rs"]]],["dsf_web",["",[],["lib.rs","views.rs","web_wrapper.rs"]]],["pydsf",["",[],["core.rs","lib.rs","router.rs","service.rs"]]]]');
+//{"start":19,"fragment_lengths":[27,40,51,193,59,64]}

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["InstallMode"],"struct":["AppConfig"]};

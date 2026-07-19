@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BackendAddr","BackendError","GlobalBackend","GlobalBackendAddr"],"fn":["build_backend_auto","capture_backtrace"],"struct":["RemoteBackend","RemoteConfig","ScopedId","ScopedMetaData","SqliteBackend","SqliteConfig","StackedBackend","StackedBackendConfig"],"trait":["DatasetBackend"],"type":["BackendRef","BackendResult","DynBackend"]};

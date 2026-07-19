@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["DatasetWorkspaceView","DetailedMetaView","DetailedPanelView","IndexView","ReferrersView"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["DatasetMetaDto","GraphQuery","IdQuery","MetaDetailDto","ReferrerDto","WebGraphEdge","WebGraphNode","WebGraphResponse"]};

@@ -1,0 +1,9 @@
+(function() {
+    const implementors = Object.fromEntries([["pydsf",[["impl PyClass for <a class=\"enum\" href=\"pydsf/core/enum.PyDataSetBusyStatus.html\" title=\"enum pydsf::core::PyDataSetBusyStatus\">PyDataSetBusyStatus</a>",0],["impl PyClass for <a class=\"struct\" href=\"pydsf/core/struct.PyDSFDataSet.html\" title=\"struct pydsf::core::PyDSFDataSet\">PyDSFDataSet</a>",0],["impl PyClass for <a class=\"struct\" href=\"pydsf/core/struct.PyDataSetStatus.html\" title=\"struct pydsf::core::PyDataSetStatus\">PyDataSetStatus</a>",0],["impl PyClass for <a class=\"struct\" href=\"pydsf/core/struct.PyDataSetVerifyRes.html\" title=\"struct pydsf::core::PyDataSetVerifyRes\">PyDataSetVerifyRes</a>",0],["impl PyClass for <a class=\"struct\" href=\"pydsf/core/struct.PyMetaData.html\" title=\"struct pydsf::core::PyMetaData\">PyMetaData</a>",0],["impl PyClass for <a class=\"struct\" href=\"pydsf/router/struct.PyBackendAddr.html\" title=\"struct pydsf::router::PyBackendAddr\">PyBackendAddr</a>",0],["impl PyClass for <a class=\"struct\" href=\"pydsf/router/struct.PyScopedId.html\" title=\"struct pydsf::router::PyScopedId\">PyScopedId</a>",0],["impl PyClass for <a class=\"struct\" href=\"pydsf/router/struct.PyScopedMetaData.html\" title=\"struct pydsf::router::PyScopedMetaData\">PyScopedMetaData</a>",0],["impl PyClass for <a class=\"struct\" href=\"pydsf/service/struct.PyDSFService.html\" title=\"struct pydsf::service::PyDSFService\">PyDSFService</a>",0]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":59,"fragment_lengths":[1406]}
