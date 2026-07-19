@@ -33,8 +33,11 @@ class BusyStatus(int, Enum):
         Creating: Dataset is currently being generated or initially written.
 
     Example:
-        >>> service = DSFService()
-        >>> service.mark_status("data@v1", BusyStatus.Modifying)
+        ```python
+         service = DSFService()
+         service.mark_status("data@v1", BusyStatus.Modifying)
+
+        ```
     """
 
     Free = 0
@@ -51,9 +54,12 @@ class DataSetVerifyRes:
         dep_status: A list containing the health statuses of direct and indirect dependencies.
 
     Example:
-        >>> res = service.verify_deep("nlp_corpus@v2.0")
-        >>> if res.status == DatasetStatus.Broken:
-        ...     print("Dataset corruption detected!")
+        ```python
+         res = service.verify_deep("nlp_corpus@v2.0")
+         if res.status == DatasetStatus.Broken:
+             print("Dataset corruption detected!")
+
+        ```
     """
 
     status: DatasetStatus
@@ -67,8 +73,11 @@ class DataSetVerifyRes:
             dep_status: List of statuses for dependent datasets.
 
         Example:
-            >>> res = DataSetVerifyRes(DatasetStatus.Healthy, [DatasetStatus.Healthy])
-            >>> assert res.status == DatasetStatus.Healthy
+            ```python
+             res = DataSetVerifyRes(DatasetStatus.Healthy, [DatasetStatus.Healthy])
+             assert res.status == DatasetStatus.Healthy
+
+            ```
         """
         ...
 
@@ -89,8 +98,12 @@ class MetaData:
         merkle_tree_path: String path to the serialized Merkle tree file.
 
     Example:
-        >>> meta = service.query_meta("imagenet@v1.0")[0].metadata
-        >>> print(f"Dataset path: {meta.path}")
+        ```python
+
+         meta = service.query_meta("imagenet@v1.0")[0].metadata
+         print(f"Dataset path: {meta.path}")
+
+        ```
     """
 
     name: str
@@ -110,8 +123,11 @@ class MetaData:
             The dataset identifier string in the format "name@tag".
 
         Example:
-            >>> meta = service.query_meta("imagenet@v1.0")[0].metadata
-            >>> assert meta.id() == "imagenet@v1.0"
+            ```python
+             meta = service.query_meta("imagenet@v1.0")[0].metadata
+             assert meta.id() == "imagenet@v1.0"
+
+            ```
         """
         ...
 
@@ -121,8 +137,11 @@ class BackendAddr:
     """Represents the address and connection mode of a DataSpringFlow backend.
 
     Example:
-        >>> local_backend = BackendAddr.local_global()
-        >>> remote_backend = BackendAddr.remote_global("https://dsf.lab.org")
+        ```python
+         local_backend = BackendAddr.local_global()
+         remote_backend = BackendAddr.remote_global("https://dsf.lab.org")
+
+        ```
     """
 
     @staticmethod
@@ -136,7 +155,10 @@ class BackendAddr:
             A configured private `BackendAddr` instance.
 
         Example:
-            >>> private_addr = BackendAddr.private("flyingbucket")
+            ```python
+             private_addr = BackendAddr.private("flyingbucket")
+
+            ```
         """
         ...
 
@@ -148,8 +170,11 @@ class BackendAddr:
             A configured local-global `BackendAddr` instance.
 
         Example:
-            >>> addr = BackendAddr.local_global()
-            >>> metas = service.query_meta("data@v1", target_backend=addr)
+            ```python
+             addr = BackendAddr.local_global()
+             metas = service.query_meta("data@v1", target_backend=addr)
+
+            ```
         """
         ...
 
@@ -164,7 +189,10 @@ class BackendAddr:
             A configured remote-global `BackendAddr` instance.
 
         Example:
-            >>> remote_addr = BackendAddr.remote_global("https://dsf-server.local:8080")
+            ```python
+             remote_addr = BackendAddr.remote_global("https://dsf-server.local:8080")
+
+            ```
         """
         ...
 
@@ -178,8 +206,11 @@ class ScopedMetaData:
         metadata: The dataset metadata object.
 
     Example:
-        >>> scoped = service.query_meta("imagenet@v1.0")[0]
-        >>> print(f"Found in {scoped.backend}")
+        ```python
+         scoped = service.query_meta("imagenet@v1.0")[0]
+         print(f"Found in {scoped.backend}")
+
+        ```
     """
     @property
     def backend(self) -> BackendAddr: ...
@@ -195,8 +226,11 @@ class ScopedId:
         id: The formatted dataset ID string ("name@tag").
 
     Example:
-        >>> refs = service.check_is_referenced("base_data@v1.0")
-        >>> print([ref.id for ref in refs])
+        ```python
+         refs = service.check_is_referenced("base_data@v1.0")
+         print([ref.id for ref in refs])
+
+        ```
     """
     @property
     def backend(self) -> BackendAddr: ...
@@ -212,8 +246,11 @@ class DSFDataset:
         detailed_status: The latest verification status of the dataset and dependencies.
 
     Example:
-        >>> # Typically managed internally by DSFService during verification
-        >>> print(f"Current verification status: {dataset.detailed_status.status}")
+        ```python
+         # Typically managed internally by DSFService during verification
+         print(f"Current verification status: {dataset.detailed_status.status}")
+
+        ```
     """
     @property
     def metadata(self) -> MetaData: ...
@@ -240,12 +277,15 @@ class DSFService:
     (`update_merkle`), and topological DAG verification across storage backends.
 
     Example:
-        >>> service = DSFService()
-        >>> # Erect fence -> mutate disk -> seal changes -> tear down fence
-        >>> service.mark_status("data@v1", BusyStatus.Modifying)
-        >>> # ... modify disk files ...
-        >>> service.update_merkle("data@v1")
-        >>> service.mark_status("data@v1", BusyStatus.Free)
+        ```python
+         service = DSFService()
+         # Erect fence -> mutate disk -> seal changes -> tear down fence
+         service.mark_status("data@v1", BusyStatus.Modifying)
+         # ... modify disk files ...
+         service.update_merkle("data@v1")
+         service.mark_status("data@v1", BusyStatus.Free)
+
+        ```
     """
 
     def __init__(self) -> None:
@@ -255,7 +295,10 @@ class DSFService:
             RuntimeError: If the backend architecture fails to initialize or connect.
 
         Example:
-            >>> service = DSFService()
+            ```python
+            service = DSFService()
+
+            ```
         """
         ...
 
@@ -272,9 +315,12 @@ class DSFService:
             A list of `ScopedMetaData` objects matching the identifier.
 
         Example:
-            >>> metas = service.query_meta("imagenet@v1.0")
-            >>> if metas:
-            ...     print("Dataset found.")
+            ```python
+            metas = service.query_meta("imagenet@v1.0")
+            if metas:
+                print("Dataset found.")
+
+            ```
         """
         ...
 
@@ -310,11 +356,13 @@ class DSFService:
             RuntimeError: If dataset registration or initialization fails.
 
         Example:
-            >>> service.register(
-            ...     name="clean_corpus", tag="v1.0",
-            ...     path="./data/corpus", script_path="./scripts/clean.py",
-            ...     dependencies=["raw_corpus@v1.0"], force_heal=True
-            ... )
+            ```python
+             service.register(
+                 name="clean_corpus", tag="v1.0",
+                 path="./data/corpus", script_path="./scripts/clean.py",
+                 dependencies=["raw_corpus@v1.0"], force_heal=True
+             )
+            ```
         """
         ...
 
@@ -334,10 +382,13 @@ class DSFService:
             RuntimeError: If recalculating or saving the Merkle tree fails.
 
         Example:
-            >>> service.mark_status("corpus@v1", BusyStatus.Modifying)
-            >>> # Alter disk files...
-            >>> service.update_merkle("corpus@v1")
-            >>> service.mark_status("corpus@v1", BusyStatus.Free)
+            ```python
+             service.mark_status("corpus@v1", BusyStatus.Modifying)
+             # Alter disk files...
+             service.update_merkle("corpus@v1")
+             service.mark_status("corpus@v1", BusyStatus.Free)
+
+            ```
         """
         ...
 
@@ -361,9 +412,11 @@ class DSFService:
             RuntimeError: If deletion fails or if dependencies exist without force=True.
 
         Example:
-            >>> service.mark_status("old_data@v0.1", BusyStatus.Deleting)
-            >>> import shutil; shutil.rmtree("./data/old_data")  # Remove disk files
-            >>> service.delete_metadata("old_data@v0.1", force=True)
+            ```python
+             service.mark_status("old_data@v0.1", BusyStatus.Deleting)
+             import shutil; shutil.rmtree("./data/old_data")  # Remove disk files
+             service.delete_metadata("old_data@v0.1", force=True)
+            ```
         """
         ...
 
@@ -390,9 +443,12 @@ class DSFService:
             RuntimeError: If the deep verification process fails to execute.
 
         Example:
-            >>> res = service.verify_deep("clean_corpus@v1.0")
-            >>> if res.status == DatasetStatus.Healthy:
-            ...     print("DAG verified and ready.")
+            ```python
+             res = service.verify_deep("clean_corpus@v1.0")
+             if res.status == DatasetStatus.Healthy:
+                 print("DAG verified and ready.")
+
+            ```
         """
         ...
 
@@ -419,9 +475,12 @@ class DSFService:
             RuntimeError: If self verification process fails to execute.
 
         Example:
-            >>> res = service.verify_self("clean_corpus@v1.0")
-            >>> if res.status == DatasetStatus.Healthy:
-            ...     print("Disk data is verified and safe for concurrent read.")
+            ```python
+             res = service.verify_self("clean_corpus@v1.0")
+             if res.status == DatasetStatus.Healthy:
+                 print("Disk data is verified and safe for concurrent read.")
+
+            ```
         """
         ...
 
@@ -449,9 +508,12 @@ class DSFService:
             IOError: If querying the backend graph fails.
 
         Example:
-            >>> refs = service.check_is_referenced("raw_corpus@v1.0")
-            >>> if refs:
-            ...     print("Cannot modify safely: other datasets depend on this!")
+            ```python
+             refs = service.check_is_referenced("raw_corpus@v1.0")
+             if refs:
+                 print("Cannot modify safely: other datasets depend on this!")
+
+            ```
         """
         ...
 
@@ -475,9 +537,12 @@ class DSFService:
             RuntimeError: If setting the status in the target storage backend fails.
 
         Example:
-            >>> service.mark_status("data@v1", BusyStatus.Modifying)
-            >>> # Perform disk modifications...
-            >>> service.update_merkle("data@v1")
-            >>> service.mark_status("data@v1", BusyStatus.Free)
+            ```python
+             service.mark_status("data@v1", BusyStatus.Modifying)
+             # Perform disk modifications...
+             service.update_merkle("data@v1")
+             service.mark_status("data@v1", BusyStatus.Free)
+
+            ```
         """
         ...
