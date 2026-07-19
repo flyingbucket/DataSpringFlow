@@ -14,8 +14,21 @@ plugins:
           options:
             show_root_heading: true
             show_source: false
+            docstring_style: google
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+
+hooks:
+  - doc_hook.py
 
 nav:
   - Home: index.md
-  - Guide & Examples: examples.md
   - API Reference: api.md
+  - Rust API Docs: rustdoc/index.html

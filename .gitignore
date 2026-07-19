@@ -22,5 +22,6 @@ rust/*/Cargo.lock
 *.db
 *.tar*
 release/
+site/
 examples/example_data/
 dist_payload
