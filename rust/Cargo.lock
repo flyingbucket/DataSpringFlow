@@ -624,14 +624,14 @@ dependencies = [
 
 [[package]]
 name = "dsf-api"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "dsf-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "dsf-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "backtrace",
@@ -683,7 +683,7 @@ dependencies = [
 
 [[package]]
 name = "dsf-web"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "askama",
@@ -1357,7 +1357,7 @@ dependencies = [
 
 [[package]]
 name = "pydsf"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "dsf-core",
  "log",
