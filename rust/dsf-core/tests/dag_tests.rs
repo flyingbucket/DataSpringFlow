@@ -234,7 +234,7 @@ mod service_status_tests {
             .service()
             .query_meta(id, None)
             .expect("Failed to query metadata");
-        assert_eq!(queried[0].1.busy_status, Some(DataSetBusyStatus::Reading));
+        assert_eq!(queried[0].1.busy_status, DataSetBusyStatus::Reading);
 
         // 2. 验证状态覆盖：切换为 Deleting 状态
         sandbox
@@ -247,10 +247,7 @@ mod service_status_tests {
             .query_meta(id, None)
             .expect("Failed to query metadata again");
 
-        assert_eq!(
-            queried_again[0].1.busy_status,
-            Some(DataSetBusyStatus::Deleting)
-        );
+        assert_eq!(queried_again[0].1.busy_status, DataSetBusyStatus::Deleting);
     }
 
     #[test]
