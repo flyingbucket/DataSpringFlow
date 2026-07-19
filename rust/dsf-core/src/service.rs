@@ -123,7 +123,7 @@ impl DSFService {
             opts.owner_nickname,
             opts.dependencies,
             merkle_tree_path,
-            None,
+            DataSetBusyStatus::Free,
         )?;
         // backend_handel.as_ref().save_metadata(&meta)?;
         self.backend.save_metadata(&meta, target_backend)?;

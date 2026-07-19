@@ -51,7 +51,7 @@ pub struct MetaData {
     pub owner: String,
     pub dependencies: Vec<String>,
     pub merkle_tree_path: PathBuf,
-    pub busy_status: Option<DataSetBusyStatus>,
+    pub busy_status: DataSetBusyStatus,
 }
 
 impl MetaData {
@@ -68,7 +68,7 @@ impl MetaData {
         owner_nickname: Option<String>,
         dependencies: Vec<String>,
         merkle_tree_path: PathBuf,
-        busy_status: Option<DataSetBusyStatus>,
+        busy_status: DataSetBusyStatus,
     ) -> Result<Self, MetaDataError> {
         if name.contains('@') {
             return Err(MetaDataError::InvalidName(
@@ -182,6 +182,7 @@ pub enum DataSetStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataSetBusyStatus {
+    Free,
     Reading,
     Modifying,
     Deleting,
@@ -190,6 +191,7 @@ pub enum DataSetBusyStatus {
 impl DataSetBusyStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
+            DataSetBusyStatus::Free => "free",
             DataSetBusyStatus::Reading => "reading",
             DataSetBusyStatus::Modifying => "modifying",
             DataSetBusyStatus::Deleting => "deleting",
@@ -208,6 +210,7 @@ impl std::str::FromStr for DataSetBusyStatus {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            "free" => Ok(DataSetBusyStatus::Free),
             "reading" => Ok(DataSetBusyStatus::Reading),
             "modifying" => Ok(DataSetBusyStatus::Modifying),
             "deleting" => Ok(DataSetBusyStatus::Deleting),
@@ -225,6 +228,7 @@ impl DataSetStatus {
             DataSetStatus::BrokenDeps => "broken_deps",
             DataSetStatus::Unverified => "unverified",
             // 穷举嵌套的 Busy 状态，保持高效的 &'static str 返回
+            DataSetStatus::Busy(DataSetBusyStatus::Free) => "free",
             DataSetStatus::Busy(DataSetBusyStatus::Reading) => "busy_reading",
             DataSetStatus::Busy(DataSetBusyStatus::Modifying) => "busy_modifying",
             DataSetStatus::Busy(DataSetBusyStatus::Deleting) => "busy_deleting",
@@ -275,7 +279,7 @@ impl DSFDataSet {
         show_diff: bool,
         dep_statuses: &[DataSetStatus],
     ) -> io::Result<DataSetVerifyRes> {
-        if let Some(busy) = self.metadata.busy_status
+        if let busy = self.metadata.busy_status
             && busy != DataSetBusyStatus::Reading
         {
             let detailed_status = DataSetVerifyRes {
